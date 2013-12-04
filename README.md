@@ -224,4 +224,4 @@ arbitrary functions, describebed as `pallet-amazonica` data maps.
 
 Copyright © 2013 Hugo Duncan
 
-All rights reserved.
+Distributed under the Eclipse Public License.
