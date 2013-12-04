@@ -217,7 +217,7 @@ the Amazon Elastic Compute Cloud User Guide.
 ## Access to Arbitrary AWS SDK Funtions
 
 The provide provides an `execute` function that can be used to execute
-arbitrary functions, describebed as `pallet-amazonica` data maps.
+arbitrary functions, described as [`awaze`](https://github.com/pallet/awaze) data maps.
 
 
 ## License
