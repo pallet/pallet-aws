@@ -10,6 +10,7 @@
    [pallet.action-plan :as action-plan]
    [pallet.compute :as compute]
    [pallet.compute.ec2.ami :as ami]
+   [pallet.compute.ec2.protocols :as impl]
    [pallet.compute.ec2.static :as static]
    [pallet.compute.implementation :as implementation]
    [pallet.execute :as execute]
@@ -97,8 +98,9 @@
      [(:instance-id info)]
      (state-tag (merge old-state state)))))
 
-(defprotocol AwsExecute
-  (execute [_ command args] "Execute an aws comment"))
+(defn execute
+  [service command args]
+  (impl/execute service command args))
 
 (defn image-info [service ami image-atom]
   (if-let [i @image-atom]
@@ -168,10 +170,11 @@
 
 ;;; Compute service
 (defn ensure-keypair [credentials api key-name user]
-  (let [key-pairs (aws/execute
-                   api (ec2/describe-key-pairs-map
-                        credentials
-                        {:filter [{:name "key-name" :value [key-name]}]}))]
+  (let [key-pairs (try (aws/execute
+                        api (ec2/describe-key-pairs-map
+                             credentials
+                             {:key-names [key-name]}))
+                       (catch com.amazonaws.AmazonServiceException _))]
     (debugf "ensure-keypair existing %s" key-pairs)
     (when (zero? (count key-pairs))
       (aws/execute
@@ -445,7 +448,7 @@
     (when (.tag_provider compute)
       (compute/node-taggable? (.tag_provider compute) node)))
 
-  AwsExecute
+  impl/AwsExecute
   (execute [compute command args]
     (aws/execute api (command credentials args))))
 

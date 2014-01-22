@@ -10,7 +10,7 @@ The EC2 provider uses the `:pallet-ec2` key.
 Add the following to your dependencies:
 
 ```clj
-[com.palletops/pallet-aws "0.1.0"]
+[com.palletops/pallet-aws "0.1.1"]
 ```
 ## Node-Spec Options
 
@@ -217,7 +217,7 @@ the Amazon Elastic Compute Cloud User Guide.
 ## Access to Arbitrary AWS SDK Funtions
 
 The provide provides an `execute` function that can be used to execute
-arbitrary functions, describebed as `pallet-amazonica` data maps.
+arbitrary functions, described as [`awaze`](https://github.com/pallet/awaze) data maps.
 
 
 ## License
