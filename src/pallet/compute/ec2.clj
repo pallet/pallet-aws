@@ -168,10 +168,11 @@
 
 ;;; Compute service
 (defn ensure-keypair [credentials api key-name user]
-  (let [key-pairs (aws/execute
-                   api (ec2/describe-key-pairs-map
-                        credentials
-                        {:filter [{:name "key-name" :value [key-name]}]}))]
+  (let [key-pairs (try (aws/execute
+                        api (ec2/describe-key-pairs-map
+                             credentials
+                             {:filter [{:name "key-name" :value [key-name]}]}))
+                       (catch com.amazonaws.AmazonServiceException _))]
     (debugf "ensure-keypair existing %s" key-pairs)
     (when (zero? (count key-pairs))
       (aws/execute
