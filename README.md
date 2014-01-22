@@ -10,7 +10,7 @@ The EC2 provider uses the `:pallet-ec2` key.
 Add the following to your dependencies:
 
 ```clj
-[com.palletops/pallet-aws "0.1.0"]
+[com.palletops/pallet-aws "0.1.1"]
 ```
 ## Node-Spec Options
 
