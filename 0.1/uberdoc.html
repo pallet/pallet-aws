@@ -3028,8 +3028,8 @@ net.brehaut.ClojureTools = (function (SH) {
     build_tree: build_tree
   };
 })(SyntaxHighlighter);
-</script><title>com.palletops/pallet-aws -- Marginalia</title></head><body><table><tr><td class="docs"><div class="header"><h1 class="project-name">com.palletops/pallet-aws</h1><h2 class="project-version">0.1.0</h2><br /><p>A provider for using Pallet with AWS EC2, based on the AWS SDK.</p>
-</div><div class="dependencies"><h3>dependencies</h3><table><tr><td class="dep-name">com.palletops/pallet-aws-ops</td><td class="dotted"><hr /></td><td class="dep-version">0.1.0</td></tr><tr><td class="dep-name">com.palletops/pallet</td><td class="dotted"><hr /></td><td class="dep-version">0.8.0-RC.3</td></tr><tr><td class="dep-name">org.clojure/core.match</td><td class="dotted"><hr /></td><td class="dep-version">0.2.0</td></tr></table></div></td><td class="codes" style="text-align: center; vertical-align: middle;color: #666;padding-right:20px"><br /><br /><br />(this space intentionally left almost blank)</td></tr><tr><td class="docs"><div class="toc"><a name="toc"><h3>namespaces</h3></a><ul><li><a href="#pallet.compute.ec2">pallet.compute.ec2</a></li><li><a href="#pallet.compute.ec2.ami">pallet.compute.ec2.ami</a></li><li><a href="#pallet.compute.ec2.static">pallet.compute.ec2.static</a></li></ul></div></td><td class="codes">&nbsp;</td></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#pallet.compute.ec2" name="pallet.compute.ec2"><h1 class="project-name">pallet.compute.ec2</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>Amazon ec2 provider for pallet</p>
+</script><title>com.palletops/pallet-aws -- Marginalia</title></head><body><table><tr><td class="docs"><div class="header"><h1 class="project-name">com.palletops/pallet-aws</h1><h2 class="project-version">0.1.1</h2><br /><p>A provider for using Pallet with AWS EC2, based on the AWS SDK.</p>
+</div><div class="dependencies"><h3>dependencies</h3><table><tr><td class="dep-name">com.palletops/pallet-aws-ops</td><td class="dotted"><hr /></td><td class="dep-version">0.1.0</td></tr><tr><td class="dep-name">com.palletops/pallet</td><td class="dotted"><hr /></td><td class="dep-version">0.8.0-RC.3</td></tr><tr><td class="dep-name">org.clojure/core.match</td><td class="dotted"><hr /></td><td class="dep-version">0.2.0</td></tr></table></div></td><td class="codes" style="text-align: center; vertical-align: middle;color: #666;padding-right:20px"><br /><br /><br />(this space intentionally left almost blank)</td></tr><tr><td class="docs"><div class="toc"><a name="toc"><h3>namespaces</h3></a><ul><li><a href="#pallet.compute.ec2">pallet.compute.ec2</a></li><li><a href="#pallet.compute.ec2.ami">pallet.compute.ec2.ami</a></li><li><a href="#pallet.compute.ec2.protocols">pallet.compute.ec2.protocols</a></li><li><a href="#pallet.compute.ec2.static">pallet.compute.ec2.static</a></li></ul></div></td><td class="codes">&nbsp;</td></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#pallet.compute.ec2" name="pallet.compute.ec2"><h1 class="project-name">pallet.compute.ec2</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>Amazon ec2 provider for pallet</p>
 </td><td class="codes"><pre class="brush: clojure">(ns pallet.compute.ec2
   (:require
    [clojure.core.async :refer [alts!! chan timeout]]
@@ -3041,6 +3041,7 @@ net.brehaut.ClojureTools = (function (SH) {
    [pallet.action-plan :as action-plan]
    [pallet.compute :as compute]
    [pallet.compute.ec2.ami :as ami]
+   [pallet.compute.ec2.protocols :as impl]
    [pallet.compute.ec2.static :as static]
    [pallet.compute.implementation :as implementation]
    [pallet.execute :as execute]
@@ -3106,8 +3107,9 @@ net.brehaut.ClojureTools = (function (SH) {
      credentials
      [(:instance-id info)]
      (state-tag (merge old-state state)))))</pre></td></tr><tr><td class="docs">
-</td><td class="codes"><pre class="brush: clojure">(defprotocol AwsExecute
-  (execute [_ command args] &quot;Execute an aws comment&quot;))</pre></td></tr><tr><td class="docs">
+</td><td class="codes"><pre class="brush: clojure">(defn execute
+  [service command args]
+  (impl/execute service command args))</pre></td></tr><tr><td class="docs">
 </td><td class="codes"><pre class="brush: clojure">(defn image-info [service ami image-atom]
   (if-let [i @image-atom]
     i
@@ -3166,10 +3168,11 @@ net.brehaut.ClojureTools = (function (SH) {
   [user]
   (str &quot;pallet-&quot; (:username user)))</pre></td></tr><tr><td class="docs"><p>Compute service</p>
 </td><td class="codes"><pre class="brush: clojure">(defn ensure-keypair [credentials api key-name user]
-  (let [key-pairs (aws/execute
-                   api (ec2/describe-key-pairs-map
-                        credentials
-                        {:filter [{:name &quot;key-name&quot; :value [key-name]}]}))]
+  (let [key-pairs (try (aws/execute
+                        api (ec2/describe-key-pairs-map
+                             credentials
+                             {:key-names [key-name]}))
+                       (catch com.amazonaws.AmazonServiceException _))]
     (debugf &quot;ensure-keypair existing %s&quot; key-pairs)
     (when (zero? (count key-pairs))
       (aws/execute
@@ -3421,7 +3424,7 @@ net.brehaut.ClojureTools = (function (SH) {
   (node-taggable? [compute node]
     (when (.tag_provider compute)
       (compute/node-taggable? (.tag_provider compute) node)))
-  AwsExecute
+  impl/AwsExecute
   (execute [compute command args]
     (aws/execute api (command credentials args))))</pre></td></tr><tr><td class="docs"><p>service factory implementation for ec2</p>
 </td><td class="codes"><pre class="brush: clojure">(defmethod implementation/service :pallet-ec2
@@ -3510,7 +3513,10 @@ net.brehaut.ClojureTools = (function (SH) {
 mode: clojure
 eval: (define-clojure-indent (match 1))
 End:</p>
-</td><td class="codes"></td></tr><tr><td class="spacer docs">&nbsp;</td><td class="codes" /></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#pallet.compute.ec2.static" name="pallet.compute.ec2.static"><h1 class="project-name">pallet.compute.ec2.static</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>Static data for EC2 (data not available in ec2 apis)</p>
+</td><td class="codes"></td></tr><tr><td class="spacer docs">&nbsp;</td><td class="codes" /></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#pallet.compute.ec2.protocols" name="pallet.compute.ec2.protocols"><h1 class="project-name">pallet.compute.ec2.protocols</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs">
+</td><td class="codes"><pre class="brush: clojure">(ns pallet.compute.ec2.protocols)</pre></td></tr><tr><td class="docs">
+</td><td class="codes"><pre class="brush: clojure">(defprotocol AwsExecute
+  (execute [_ command args] &quot;Execute an aws comment&quot;))</pre></td></tr><tr><td class="spacer docs">&nbsp;</td><td class="codes" /></tr><tr><td class="docs"><div class="docs-header"><a class="anchor" href="#pallet.compute.ec2.static" name="pallet.compute.ec2.static"><h1 class="project-name">pallet.compute.ec2.static</h1><a class="toc-link" href="#toc">toc</a></a></div></td><td class="codes" /></tr><tr><td class="docs"><p>Static data for EC2 (data not available in ec2 apis)</p>
 </td><td class="codes"><pre class="brush: clojure">(ns pallet.compute.ec2.static)</pre></td></tr><tr><td class="docs">
 </td><td class="codes"><pre class="brush: clojure">(def instance-types
   {:m1.small
