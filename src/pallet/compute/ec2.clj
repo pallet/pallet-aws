@@ -173,7 +173,7 @@
   (let [key-pairs (try (aws/execute
                         api (ec2/describe-key-pairs-map
                              credentials
-                             {:filter [{:name "key-name" :value [key-name]}]}))
+                             {:key-names [key-name]}))
                        (catch com.amazonaws.AmazonServiceException _))]
     (debugf "ensure-keypair existing %s" key-pairs)
     (when (zero? (count key-pairs))
