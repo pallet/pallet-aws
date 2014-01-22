@@ -10,6 +10,7 @@
    [pallet.action-plan :as action-plan]
    [pallet.compute :as compute]
    [pallet.compute.ec2.ami :as ami]
+   [pallet.compute.ec2.protocols :as impl]
    [pallet.compute.ec2.static :as static]
    [pallet.compute.implementation :as implementation]
    [pallet.execute :as execute]
@@ -97,8 +98,9 @@
      [(:instance-id info)]
      (state-tag (merge old-state state)))))
 
-(defprotocol AwsExecute
-  (execute [_ command args] "Execute an aws comment"))
+(defn execute
+  [service command args]
+  (impl/execute service command args))
 
 (defn image-info [service ami image-atom]
   (if-let [i @image-atom]
@@ -446,7 +448,7 @@
     (when (.tag_provider compute)
       (compute/node-taggable? (.tag_provider compute) node)))
 
-  AwsExecute
+  impl/AwsExecute
   (execute [compute command args]
     (aws/execute api (command credentials args))))
 
