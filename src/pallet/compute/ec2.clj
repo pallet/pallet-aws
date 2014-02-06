@@ -3,7 +3,7 @@
   (:require
    [clojure.core.async :refer [alts!! chan timeout]]
    [clojure.string :as string]
-   [clojure.tools.logging :as logging :refer [debugf warnf]]
+   [clojure.tools.logging :as logging :refer [debugf warnf infof]]
    [com.palletops.awaze.ec2 :as ec2]
    [com.palletops.aws.api :as aws]
    [com.palletops.aws.instance-poller :as poller]
@@ -192,12 +192,14 @@
                        (catch com.amazonaws.AmazonServiceException _))]
     (debugf "ensure-keypair existing %s" key-pairs)
     (when (zero? (count key-pairs))
+      (infof "Keypair '%s' not present. Creating it..." key-name)
       (aws/execute
        api
        (ec2/import-key-pair-map
         credentials
         {:key-name key-name
-         :public-key-material (slurp (:public-key-path user))})))))
+         :public-key-material (slurp (:public-key-path user))}))
+      (infof "Keypair '%s' created." key-name ))))
 
 (defn ensure-security-group [credentials api security-group-name]
   (let [sgs (try
@@ -208,6 +210,7 @@
               (catch com.amazonaws.AmazonServiceException e))]
     (debugf "ensure-security-group existing %s" (pr-str sgs))
     (when-not (seq sgs)
+      (infof "Security group '%s' not present. Creating it..." security-group-name)
       (aws/execute
        api
        (ec2/create-security-group-map
@@ -215,6 +218,7 @@
         {:group-name security-group-name
          :description
          (str "Pallet created group for " security-group-name)}))
+      (infof "Security group '%s' created. Opening SSH port..." security-group-name)
       (aws/execute
        api
        (ec2/authorize-security-group-ingress-map
@@ -223,7 +227,8 @@
          :ip-permissions [{:ip-protocol "tcp"
                            :from-port 22
                            :to-port 22
-                           :ip-ranges ["0.0.0.0/0"]}]})))))
+                           :ip-ranges ["0.0.0.0/0"]}]}))
+      (infof "SSH port is open for group '%s'" security-group-name))))
 
 (defn- get-tags [credentials api node]
   (let [tags (aws/execute
@@ -302,7 +307,7 @@
   pallet.compute.ComputeService
 
   (nodes [service]
-    (debugf "nodes")
+    (debugf "getting nodes")
     (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
       (let [instances (aws/execute
                        api (ec2/describe-instances-map credentials {}))]
@@ -379,6 +384,7 @@
                               credentials api security-group)
                              security-group))]
       (debugf "run-nodes %s nodes" node-count)
+      (infof "Creating %s node(s) in group '%s'..." node-count (name (:group-name group-spec)))
       (let [options (launch-options
                      node-count group-spec security-group key-name)
             resp (ec2/run-instances credentials options)]
@@ -402,11 +408,14 @@
                     instances (->> (for [_ (range (count idmaps))]
                                      (first (alts!! [channel timeout])))
                                    (remove nil?))
-                    running? (fn [node] (= "running" (-> node :state :name)))]
-                (debugf "run-nodes Waiting for instances to come up")
+                    running? (fn [node] (= "running" (-> node :state :name)))
+                    _ (debugf "run-nodes Waiting for instances to come up")
+                    good-instances (filter running? instances)]
                 (when-let [failed (seq
                                    (filter (complement running?) instances))]
                   (warnf "run-nodes Nodes failed to start %s" (vec failed))
+                  (warnf "%s of %s node(s) failed to start successfully for group '%s'"
+                         (count failed) node-count (name (:group-name group-spec)))
                   (aws/execute api
                                (ec2/terminate-instances-map
                                 credentials
@@ -414,9 +423,12 @@
                 (when (not= (count instances) (count idmaps))
                   (warnf "run-nodes Nodes still pending: %s"
                          (- (count idmaps) (count instances))))
+                (infof "Created %s node(s) in group '%s' (%s node(s) requested)"
+                       (count good-instances)
+                       (name (:group-name group-spec))
+                       node-count)
                 (debugf "run-nodes Tagging")
-                (->> instances
-                     (filter running?)
+                (->> good-instances
                      (tag-instances-for-group-spec credentials api group-spec)
                      (map make-node)))))))))
 
