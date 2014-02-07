@@ -362,15 +362,15 @@
                               credentials api security-group)
                              security-group))]
       (debugf "run-instances %s nodes" node-count)
-      (infof "Creating %s node(s) in group '%s'..." node-count (name (:group-name group-spec)))
+      (infof "Creating %s node(s) in group '%s'..."
+             node-count (name (:group-name group-spec)))
       (let [options (launch-options
                      node-count group-spec security-group key-name)
             _ (debugf "run-instances options %s" options)
             resp (ec2/run-instances credentials options)]
         (debugf "run-instances %s" resp)
         (debugf "run-instances %s" (-> resp :reservation :instances))
-        (letfn [(make-node [info]
-                  (Ec2Node. service info (atom nil)))]
+        (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
           (when-let [instances (seq (-> resp :reservation :instances))]
             (let [ids (map :instance-id instances)
                   notify-fn #(not= "pending" (-> % :state :name))
@@ -404,11 +404,14 @@
                 (let [started-nodes (map make-node (filter running? instances))
                       success-count (count started-nodes)
                       failed-nodes (- node-count success-count)]
-                  (infof "Created %s node(s) in group '%s' (%s node(s) requested)"
-                         success-count (name (:group-name group-spec)) node-count)
-                  (when (> 0 failed-nodes)
-                    (warnf "%s of %s node(s) failed to start successfully for group '%s'"
-                           failed-nodes node-count (name (:group-name group-spec))))))))))))
+                  (infof
+                   "Created %s node(s) in group '%s' (%s node(s) requested)"
+                   success-count (name (:group-name group-spec)) node-count)
+                  (when (pos? failed-nodes)
+                    (warnf
+                     "%s of %s node(s) failed to start successfully for group '%s'"
+                     failed-nodes node-count
+                     (name (:group-name group-spec))))))))))))
 
   (reboot [_ nodes])
 
