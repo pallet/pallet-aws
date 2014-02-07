@@ -411,7 +411,8 @@
                     (warnf
                      "%s of %s node(s) failed to start successfully for group '%s'"
                      failed-nodes node-count
-                     (name (:group-name group-spec))))))))))))
+                     (name (:group-name group-spec))))
+                  started-nodes))))))))
 
   (reboot [_ nodes])
 
