@@ -384,7 +384,8 @@
                               credentials api security-group)
                              security-group))]
       (debugf "run-nodes %s nodes" node-count)
-      (infof "Creating %s node(s) in group '%s'..." node-count (name (:group-name group-spec)))
+      (infof "Creating %s node(s) in group '%s'..."
+             node-count (name (:group-name group-spec)))
       (let [options (launch-options
                      node-count group-spec security-group key-name)
             resp (ec2/run-instances credentials options)]
@@ -414,8 +415,9 @@
                 (when-let [failed (seq
                                    (filter (complement running?) instances))]
                   (warnf "run-nodes Nodes failed to start %s" (vec failed))
-                  (warnf "%s of %s node(s) failed to start successfully for group '%s'"
-                         (count failed) node-count (name (:group-name group-spec)))
+                  (warnf
+                   "%s of %s node(s) failed to start for group '%s'"
+                   (count failed) node-count (name (:group-name group-spec)))
                   (aws/execute api
                                (ec2/terminate-instances-map
                                 credentials
