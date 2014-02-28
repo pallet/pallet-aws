@@ -95,7 +95,6 @@
   (tag-instances
    credentials
    api
-   instance-ids
    (concat
     (map juxt instance-ids (repeat (group-tag group-spec)))
     (map juxt instance-ids (repeat (image-tag group-spec)))
