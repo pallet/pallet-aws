@@ -383,7 +383,7 @@
           (when-let [instances (seq (-> resp :reservation :instances))]
             (let [ids (map :instance-id instances)
                   ips (map
-                       #(some-fn :public-ip-address :private-ip-address)
+                       (some-fn :public-ip-address :private-ip-address)
                        instances)
                   notify-fn #(not= "pending" (-> % :state :name))
                   channel (chan)
