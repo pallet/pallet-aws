@@ -50,6 +50,13 @@
                      [:image-id :os-family :os-version :os-64-bit
                       :login-user]))))})
 
+(defn name-tag
+  "Return the group tag for a group"
+  [group-spec ip]
+  {:key "Name"
+   :value (str (name (:group-name group-spec))
+               "_" (string/replace (or ip "noip") #"\." "-"))})
+
 (defn state-tag
   "Return the state tag for a group"
   [node-state]
@@ -71,24 +78,32 @@
   (when-let [state (get-tag info pallet-image-tag)]
     (read-string state)))
 
-(defn tag-instances [credentials api ids & tags]
-  (debugf "tag-instances %s %s" ids tags)
+(defn tag-instances [credentials api id-tags]
+  "Tag instances. id-tags is a sequence of id, tag tuples.  A tag is a
+  map with :key and :value keys."
+  (debugf "tag-instances %s" id-tags)
   (aws/execute
    api
    (ec2/create-tags-map
     credentials
-    {:resources (apply concat (repeat (count tags) ids))
-     :tags (mapcat #(repeat (count ids) %) tags)})))
+    {:resources (map first id-tags)
+     :tags (map second id-tags)})))
+
+(defn id-tags
+  [group-spec instance-ids instance-ips]
+  (concat
+   (mapv vector instance-ids (repeat (group-tag group-spec)))
+   (mapv vector instance-ids (repeat (image-tag group-spec)))
+   (mapv vector instance-ids
+         (map #(name-tag group-spec %) instance-ips))))
 
 (defn tag-instances-for-group-spec
-  [credentials api group-spec instance-ids]
+  [credentials api group-spec instance-ids instance-ips]
   (debugf "tag-instances-for-group-spec %s %s" group-spec instance-ids)
   (tag-instances
    credentials
    api
-   instance-ids
-   (group-tag group-spec)
-   (image-tag group-spec)))
+   (id-tags group-spec instance-ids instance-ips)))
 
 (defn tag-instance-state
   "Update the instance's state"
@@ -374,8 +389,6 @@
                                 #(vector % [{:channel channel
                                              :notify-when-f notify-fn}])
                                 ids))]
-              (debugf "run-instances tagging")
-              (tag-instances-for-group-spec credentials api group-spec ids)
               ;; Wait for the nodes to come up
               (poller/add-instances instance-poller idmaps)
               (debugf "polling instances" idmaps)
@@ -394,8 +407,17 @@
                                 {:instance-ids (mapv :instance-id failed)})))
                 (when (not= (count instances) (count idmaps))
                   (warnf "run-nodes Nodes still pending: %s"
+
                          (- (count idmaps) (count instances))))
-                (map make-node (filter running? instances)))))))))
+                (let [instances (filter running? instances)
+                      ids (map :instance-id instances)
+                      ips (map
+                           (some-fn :public-ip-address :private-ip-address)
+                           instances)]
+                  (debugf "run-instances tagging")
+                  (tag-instances-for-group-spec
+                   credentials api group-spec ids ips)
+                  (map make-node instances)))))))))
 
   (reboot [_ nodes])
 
