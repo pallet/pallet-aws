@@ -47,7 +47,8 @@
             (pr (-> group-spec
                     :image
                     (select-keys
-                     [:image-id :os-family :os-version :os-64-bit]))))})
+                     [:image-id :os-family :os-version :os-64-bit
+                      :login-user]))))})
 
 (defn state-tag
   "Return the state tag for a group"
@@ -111,23 +112,26 @@
              :images
              first))))
 
+;; (-> (image-info service (:image-id info) image)
+;;                             ami/parse
+;;                             :os-family)
+;; (-> (image-info service (:image-id info) image)
+;;                              ami/parse
+;;                              :os-version)
+;; (-> (image-info service (:image-id info) image)
+;;                          ami/parse
+;;                          :user)
+
 ;;; ### Node
-(deftype Ec2Node
-    [service info image]
+(deftype Ec2Node [service info image]
   pallet.node/Node
   (ssh-port [node] 22)
   (primary-ip [node] (:public-ip-address info))
   (private-ip [node] (:private-ip-address info))
   (is-64bit? [node] (= "x86_64" (:architecture info)))
   (group-name [node] (get-tag info pallet-group-tag))
-  (os-family [node] (or (:os-family (node-image-value info))
-                        (-> (image-info service (:image-id info) image)
-                         ami/parse
-                         :os-family)))
-  (os-version [node] (or (:os-version (node-image-value info))
-                         (-> (image-info service (:image-id info) image)
-                         ami/parse
-                         :os-version)))
+  (os-family [node] (:os-family (node-image-value info)))
+  (os-version [node] (:os-version (node-image-value info)))
   (hostname [node] (:public-dns-name info))
   (id [node] (:instance-id info))
   (running? [node] (= "running" (-> info :state :name)))
@@ -137,9 +141,7 @@
   pallet.node/NodePackager
   (packager [node] nil)
   pallet.node/NodeImage
-  (image-user [node] (-> (image-info service (:image-id info) image)
-                         ami/parse
-                         :user))
+  (image-user [node] {:username (:login-user (node-image-value info))})
   pallet.node/NodeHardware
   (hardware [node]
     (let [id (keyword (:instance-type info))]
@@ -341,6 +343,11 @@
       group-spec))
 
   (run-nodes [service group-spec node-count user init-script options]
+    (when-not (every? (:image group-spec) [:os-family :os-version :login-user])
+      (ex-info
+       "node-spec :image must contain :os-family :os-version :login-user keys"
+       {:supplied (select-keys (:image group-spec)
+                               [:os-family :os-version :login-user])}))
     (debugf "run-nodes %s %s" (:group-name group-spec) node-count)
     (let [key-name (-> group-spec :image :key-name)
           key-name (if key-name
