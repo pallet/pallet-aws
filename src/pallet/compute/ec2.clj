@@ -432,7 +432,7 @@
 
   pallet.compute.ec2.protocols.AwsParseAMI
   (ami-info [service ami-id]
-    (-> (image-info service ami-id image-info)
+    (-> (pallet.compute.ec2/image-info service ami-id image-info)
         ami/parse))
 
   pallet.environment.Environment
