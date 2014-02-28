@@ -89,17 +89,21 @@
     {:resources (map first id-tags)
      :tags (map second id-tags)})))
 
+(defn id-tags
+  [group-spec instance-ids instance-ips]
+  (concat
+   (mapv vector instance-ids (repeat (group-tag group-spec)))
+   (mapv vector instance-ids (repeat (image-tag group-spec)))
+   (mapv vector instance-ids
+         (map #(name-tag group-spec %) instance-ips))))
+
 (defn tag-instances-for-group-spec
   [credentials api group-spec instance-ids instance-ips]
   (debugf "tag-instances-for-group-spec %s %s" group-spec instance-ids)
   (tag-instances
    credentials
    api
-   (concat
-    (map juxt instance-ids (repeat (group-tag group-spec)))
-    (map juxt instance-ids (repeat (image-tag group-spec)))
-    (map juxt instance-ids
-         (map #(name-tag group-spec %) instance-ips)))))
+   (id-tags group-spec instance-ids instance-ips)))
 
 (defn tag-instance-state
   "Update the instance's state"
