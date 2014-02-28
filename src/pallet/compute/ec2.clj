@@ -448,6 +448,10 @@
     (when (.tag_provider compute)
       (compute/node-taggable? (.tag_provider compute) node)))
 
+  pallet.compute.ComputeServiceProperties
+  (service-properties [compute]
+    (assoc (bean compute) :provider :pallet-ec2))
+
   impl/AwsExecute
   (execute [compute command args]
     (aws/execute api (command credentials args))))
