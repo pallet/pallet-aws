@@ -81,7 +81,7 @@
 (defn tag-instances [credentials api id-tags]
   "Tag instances. id-tags is a sequence of id, tag tuples.  A tag is a
   map with :key and :value keys."
-  (debugf "tag-instances %s %s" id-tags)
+  (debugf "tag-instances %s" id-tags)
   (aws/execute
    api
    (ec2/create-tags-map
