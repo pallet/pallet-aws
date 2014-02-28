@@ -103,6 +103,10 @@
   [service command args]
   (impl/execute service command args))
 
+(defn ami-info
+  [service ami-id]
+  (impl/ami-info service ami-id))
+
 (defn image-info [service ami image-atom]
   (if-let [i @image-atom]
     i
@@ -111,16 +115,6 @@
              (execute service ec2/describe-images-map {:image-ids [ami]})
              :images
              first))))
-
-;; (-> (image-info service (:image-id info) image)
-;;                             ami/parse
-;;                             :os-family)
-;; (-> (image-info service (:image-id info) image)
-;;                              ami/parse
-;;                              :os-version)
-;; (-> (image-info service (:image-id info) image)
-;;                          ami/parse
-;;                          :user)
 
 ;;; ### Node
 (deftype Ec2Node [service info image]
@@ -435,6 +429,11 @@
 
   (close [_]
     (poller/stop instance-poller))
+
+  pallet.compute.ec2.protocols.AwsParseAMI
+  (ami-info [service ami-id]
+    (-> (pallet.compute.ec2/image-info service ami-id image-info)
+        ami/parse))
 
   pallet.environment.Environment
   (environment [_] environment)
