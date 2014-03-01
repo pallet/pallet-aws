@@ -55,7 +55,7 @@
   [group-spec ip]
   {:key "Name"
    :value (str (name (:group-name group-spec))
-               "-" (string/replace (or ip "noip") #"\." "-"))})
+               "_" (string/replace (or ip "noip") #"\." "-"))})
 
 (defn state-tag
   "Return the state tag for a group"
