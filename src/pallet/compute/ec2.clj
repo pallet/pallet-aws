@@ -55,7 +55,7 @@
   [group-spec ip]
   {:key "Name"
    :value (str (name (:group-name group-spec))
-               "-" (string/replace ip #"\." "-"))})
+               "-" (string/replace (or ip "noip") #"\." "-"))})
 
 (defn state-tag
   "Return the state tag for a group"
@@ -382,9 +382,6 @@
         (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
           (when-let [instances (seq (-> resp :reservation :instances))]
             (let [ids (map :instance-id instances)
-                  ips (map
-                       (some-fn :public-ip-address :private-ip-address)
-                       instances)
                   notify-fn #(not= "pending" (-> % :state :name))
                   channel (chan)
                   idmaps (into {}
@@ -392,8 +389,6 @@
                                 #(vector % [{:channel channel
                                              :notify-when-f notify-fn}])
                                 ids))]
-              (debugf "run-instances tagging")
-              (tag-instances-for-group-spec credentials api group-spec ids ips)
               ;; Wait for the nodes to come up
               (poller/add-instances instance-poller idmaps)
               (debugf "polling instances" idmaps)
@@ -412,8 +407,17 @@
                                 {:instance-ids (mapv :instance-id failed)})))
                 (when (not= (count instances) (count idmaps))
                   (warnf "run-nodes Nodes still pending: %s"
+
                          (- (count idmaps) (count instances))))
-                (map make-node (filter running? instances)))))))))
+                (let [instances (filter running? instances)
+                      ids (map :instance-id instances)
+                      ips (map
+                           (some-fn :public-ip-address :private-ip-address)
+                           instances)])
+                (debugf "run-instances tagging")
+                (tag-instances-for-group-spec
+                 credentials api group-spec ids ips)
+                (map make-node instances))))))))
 
   (reboot [_ nodes])
 
