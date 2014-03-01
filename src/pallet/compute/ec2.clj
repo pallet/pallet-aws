@@ -413,11 +413,11 @@
                       ids (map :instance-id instances)
                       ips (map
                            (some-fn :public-ip-address :private-ip-address)
-                           instances)])
-                (debugf "run-instances tagging")
-                (tag-instances-for-group-spec
-                 credentials api group-spec ids ips)
-                (map make-node instances))))))))
+                           instances)]
+                  (debugf "run-instances tagging")
+                  (tag-instances-for-group-spec
+                   credentials api group-spec ids ips)
+                  (map make-node instances)))))))))
 
   (reboot [_ nodes])
 
