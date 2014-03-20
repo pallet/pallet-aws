@@ -22,8 +22,14 @@ The ami to use for the image is passed as a string to the `:image-id`
 key in the node-spec's `:image`.
 
 ```clj
-(node-spec ... :image {:image-id "ami-35792c5c"})
+(node-spec ... :image {:image-id "ami-35792c5c"
+                                 :os-family :ubuntu
+                                 :os-version "13.10"
+                                 :login-user "ubuntu"})
 ```
+
+You must specify the `:os-family`, `:os-version` and `:login-user`
+with ami specific information.
 
 ### Availability Zones
 
