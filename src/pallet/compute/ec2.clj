@@ -81,7 +81,7 @@
 (defn tag-instances [credentials api id-tags]
   "Tag instances. id-tags is a sequence of id, tag tuples.  A tag is a
   map with :key and :value keys."
-  (debugf "tag-instances %s" id-tags)
+  (debugf "tag-instances %s" (pr-str id-tags))
   (aws/execute
    api
    (ec2/create-tags-map
@@ -89,21 +89,25 @@
     {:resources (map first id-tags)
      :tags (map second id-tags)})))
 
-(defn id-tags
-  [group-spec instance-ids instance-ips]
-  (concat
-   (mapv vector instance-ids (repeat (group-tag group-spec)))
-   (mapv vector instance-ids (repeat (image-tag group-spec)))
-   (mapv vector instance-ids
-         (map #(name-tag group-spec %) instance-ips))))
+(def instance-ip (some-fn :public-ip-address :private-ip-address))
+
+(defn instance-tags
+  [group-spec instance]
+  [(group-tag group-spec)
+   (image-tag group-spec)
+   (name-tag group-spec (instance-ip instance))])
+
+(defn id-tags [instance tags]
+  (map #(vector (:instance-id instance) %) tags))
 
 (defn tag-instances-for-group-spec
-  [credentials api group-spec instance-ids instance-ips]
-  (debugf "tag-instances-for-group-spec %s %s" group-spec instance-ids)
-  (tag-instances
-   credentials
-   api
-   (id-tags group-spec instance-ids instance-ips)))
+  "Returns a sequence of instance infos with tags applied"
+  [credentials api group-spec instances]
+  (debugf "tag-instances-for-group-spec %s %s" group-spec (count instances))
+  (let [tags (map #(instance-tags group-spec %) instances)
+        id-tags (mapcat id-tags instances tags)]
+    (tag-instances credentials api id-tags)
+    (map #(update-in %1 [:tags] concat %2) instances tags)))
 
 (defn tag-instance-state
   "Update the instance's state"
@@ -353,11 +357,13 @@
 
   (run-nodes [service group-spec node-count user init-script options]
     (when-not (every? (:image group-spec) [:os-family :os-version :login-user])
-      (ex-info
-       "node-spec :image must contain :os-family :os-version :login-user keys"
-       {:supplied (select-keys (:image group-spec)
-                               [:os-family :os-version :login-user])}))
-    (debugf "run-nodes %s %s" (:group-name group-spec) node-count)
+      (throw
+       (ex-info
+        "node-spec :image must contain :os-family :os-version :login-user keys"
+        {:supplied (select-keys (:image group-spec)
+                                [:os-family :os-version :login-user])})))
+    (debugf "run-nodes %s %s %s"
+            (:group-name group-spec) node-count (:image group-spec))
     (let [key-name (-> group-spec :image :key-name)
           key-name (if key-name
                      key-name
@@ -372,13 +378,13 @@
                              (ensure-security-group
                               credentials api security-group)
                              security-group))]
-      (debugf "run-instances %s nodes" node-count)
+      (debugf "run-nodes %s nodes" node-count)
       (let [options (launch-options
                      node-count group-spec security-group key-name)
-            _ (debugf "run-instances options %s" options)
             resp (ec2/run-instances credentials options)]
-        (debugf "run-instances %s" resp)
-        (debugf "run-instances %s" (-> resp :reservation :instances))
+        (debugf "run-nodes run-instances options %s" options)
+        (debugf "run-nodes run-instances %s" resp)
+        (debugf "run-nodes %s" (pr-str (-> resp :reservation :instances)))
         (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
           (when-let [instances (seq (-> resp :reservation :instances))]
             (let [ids (map :instance-id instances)
@@ -391,13 +397,13 @@
                                 ids))]
               ;; Wait for the nodes to come up
               (poller/add-instances instance-poller idmaps)
-              (debugf "polling instances" idmaps)
+              (debugf "run-nodes Polling instances %s" idmaps)
               (let [timeout (timeout (* 5 60 1000))
                     instances (->> (for [_ (range (count idmaps))]
                                      (first (alts!! [channel timeout])))
                                    (remove nil?))
                     running? (fn [node] (= "running" (-> node :state :name)))]
-                (debugf "polling instances complete")
+                (debugf "run-nodes Waiting for instances to come up")
                 (when-let [failed (seq
                                    (filter (complement running?) instances))]
                   (warnf "run-nodes Nodes failed to start %s" (vec failed))
@@ -407,17 +413,12 @@
                                 {:instance-ids (mapv :instance-id failed)})))
                 (when (not= (count instances) (count idmaps))
                   (warnf "run-nodes Nodes still pending: %s"
-
                          (- (count idmaps) (count instances))))
-                (let [instances (filter running? instances)
-                      ids (map :instance-id instances)
-                      ips (map
-                           (some-fn :public-ip-address :private-ip-address)
-                           instances)]
-                  (debugf "run-instances tagging")
-                  (tag-instances-for-group-spec
-                   credentials api group-spec ids ips)
-                  (map make-node instances)))))))))
+                (debugf "run-nodes Tagging")
+                (->> instances
+                     (filter running?)
+                     (tag-instances-for-group-spec credentials api group-spec)
+                     (map make-node)))))))))
 
   (reboot [_ nodes])
 

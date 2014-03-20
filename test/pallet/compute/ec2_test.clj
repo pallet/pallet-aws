@@ -58,3 +58,15 @@
                          [{:device-name "/dev/sdh"}]}}))
           "sg" "kn"))
       "block-device-mapping"))
+
+(deftest instance-tags-test
+  (is (= [{:key "pallet-group", :value "abcd"}
+          {:key "pallet-image", :value "{:image-id \"ami\"}"}
+          {:key "Name", :value "abcd_1-2-3-4"}]
+         (instance-tags {:group-name "abcd" :image {:image-id "ami"}}
+                        {:public-ip-address "1.2.3.4"})) ))
+
+(deftest ids-tags-test
+  (is (= [["id" {:key "Name", :value "abcd_1-2-3-4"}]]
+         (id-tags {:instance-id "id" :public-ip-address "1.2.3.4"}
+                  [{:key "Name", :value "abcd_1-2-3-4"}])) ))
