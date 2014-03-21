@@ -47,7 +47,15 @@
             (pr (-> group-spec
                     :image
                     (select-keys
-                     [:image-id :os-family :os-version :os-64-bit]))))})
+                     [:image-id :os-family :os-version :os-64-bit
+                      :login-user]))))})
+
+(defn name-tag
+  "Return the group tag for a group"
+  [group-spec ip]
+  {:key "Name"
+   :value (str (name (:group-name group-spec))
+               "_" (string/replace (or ip "noip") #"\." "-"))})
 
 (defn state-tag
   "Return the state tag for a group"
@@ -70,24 +78,36 @@
   (when-let [state (get-tag info pallet-image-tag)]
     (read-string state)))
 
-(defn tag-instances [credentials api ids & tags]
-  (debugf "tag-instances %s %s" ids tags)
+(defn tag-instances [credentials api id-tags]
+  "Tag instances. id-tags is a sequence of id, tag tuples.  A tag is a
+  map with :key and :value keys."
+  (debugf "tag-instances %s" (pr-str id-tags))
   (aws/execute
    api
    (ec2/create-tags-map
     credentials
-    {:resources (apply concat (repeat (count tags) ids))
-     :tags (mapcat #(repeat (count ids) %) tags)})))
+    {:resources (map first id-tags)
+     :tags (map second id-tags)})))
+
+(def instance-ip (some-fn :public-ip-address :private-ip-address))
+
+(defn instance-tags
+  [group-spec instance]
+  [(group-tag group-spec)
+   (image-tag group-spec)
+   (name-tag group-spec (instance-ip instance))])
+
+(defn id-tags [instance tags]
+  (map #(vector (:instance-id instance) %) tags))
 
 (defn tag-instances-for-group-spec
-  [credentials api group-spec instance-ids]
-  (debugf "tag-instances-for-group-spec %s %s" group-spec instance-ids)
-  (tag-instances
-   credentials
-   api
-   instance-ids
-   (group-tag group-spec)
-   (image-tag group-spec)))
+  "Returns a sequence of instance infos with tags applied"
+  [credentials api group-spec instances]
+  (debugf "tag-instances-for-group-spec %s %s" group-spec (count instances))
+  (let [tags (map #(instance-tags group-spec %) instances)
+        id-tags (mapcat id-tags instances tags)]
+    (tag-instances credentials api id-tags)
+    (map #(update-in %1 [:tags] concat %2) instances tags)))
 
 (defn tag-instance-state
   "Update the instance's state"
@@ -102,6 +122,10 @@
   [service command args]
   (impl/execute service command args))
 
+(defn ami-info
+  [service ami-id]
+  (impl/ami-info service ami-id))
+
 (defn image-info [service ami image-atom]
   (if-let [i @image-atom]
     i
@@ -112,22 +136,15 @@
              first))))
 
 ;;; ### Node
-(deftype Ec2Node
-    [service info image]
+(deftype Ec2Node [service info image]
   pallet.node/Node
   (ssh-port [node] 22)
   (primary-ip [node] (:public-ip-address info))
   (private-ip [node] (:private-ip-address info))
   (is-64bit? [node] (= "x86_64" (:architecture info)))
   (group-name [node] (get-tag info pallet-group-tag))
-  (os-family [node] (or (:os-family (node-image-value info))
-                        (-> (image-info service (:image-id info) image)
-                         ami/parse
-                         :os-family)))
-  (os-version [node] (or (:os-version (node-image-value info))
-                         (-> (image-info service (:image-id info) image)
-                         ami/parse
-                         :os-version)))
+  (os-family [node] (:os-family (node-image-value info)))
+  (os-version [node] (:os-version (node-image-value info)))
   (hostname [node] (:public-dns-name info))
   (id [node] (:instance-id info))
   (running? [node] (= "running" (-> info :state :name)))
@@ -137,9 +154,7 @@
   pallet.node/NodePackager
   (packager [node] nil)
   pallet.node/NodeImage
-  (image-user [node] (-> (image-info service (:image-id info) image)
-                         ami/parse
-                         :user))
+  (image-user [node] {:username (:login-user (node-image-value info))})
   pallet.node/NodeHardware
   (hardware [node]
     (let [id (keyword (:instance-type info))]
@@ -341,7 +356,14 @@
       group-spec))
 
   (run-nodes [service group-spec node-count user init-script options]
-    (debugf "run-nodes %s %s" (:group-name group-spec) node-count)
+    (when-not (every? (:image group-spec) [:os-family :os-version :login-user])
+      (throw
+       (ex-info
+        "node-spec :image must contain :os-family :os-version :login-user keys"
+        {:supplied (select-keys (:image group-spec)
+                                [:os-family :os-version :login-user])})))
+    (debugf "run-nodes %s %s %s"
+            (:group-name group-spec) node-count (:image group-spec))
     (let [key-name (-> group-spec :image :key-name)
           key-name (if key-name
                      key-name
@@ -356,13 +378,13 @@
                              (ensure-security-group
                               credentials api security-group)
                              security-group))]
-      (debugf "run-instances %s nodes" node-count)
+      (debugf "run-nodes %s nodes" node-count)
       (let [options (launch-options
                      node-count group-spec security-group key-name)
-            _ (debugf "run-instances options %s" options)
             resp (ec2/run-instances credentials options)]
-        (debugf "run-instances %s" resp)
-        (debugf "run-instances %s" (-> resp :reservation :instances))
+        (debugf "run-nodes run-instances options %s" options)
+        (debugf "run-nodes run-instances %s" resp)
+        (debugf "run-nodes %s" (pr-str (-> resp :reservation :instances)))
         (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
           (when-let [instances (seq (-> resp :reservation :instances))]
             (let [ids (map :instance-id instances)
@@ -373,17 +395,15 @@
                                 #(vector % [{:channel channel
                                              :notify-when-f notify-fn}])
                                 ids))]
-              (debugf "run-instances tagging")
-              (tag-instances-for-group-spec credentials api group-spec ids)
               ;; Wait for the nodes to come up
               (poller/add-instances instance-poller idmaps)
-              (debugf "polling instances" idmaps)
+              (debugf "run-nodes Polling instances %s" idmaps)
               (let [timeout (timeout (* 5 60 1000))
                     instances (->> (for [_ (range (count idmaps))]
                                      (first (alts!! [channel timeout])))
                                    (remove nil?))
                     running? (fn [node] (= "running" (-> node :state :name)))]
-                (debugf "polling instances complete")
+                (debugf "run-nodes Waiting for instances to come up")
                 (when-let [failed (seq
                                    (filter (complement running?) instances))]
                   (warnf "run-nodes Nodes failed to start %s" (vec failed))
@@ -394,7 +414,11 @@
                 (when (not= (count instances) (count idmaps))
                   (warnf "run-nodes Nodes still pending: %s"
                          (- (count idmaps) (count instances))))
-                (map make-node (filter running? instances)))))))))
+                (debugf "run-nodes Tagging")
+                (->> instances
+                     (filter running?)
+                     (tag-instances-for-group-spec credentials api group-spec)
+                     (map make-node)))))))))
 
   (reboot [_ nodes])
 
@@ -429,6 +453,11 @@
   (close [_]
     (poller/stop instance-poller))
 
+  pallet.compute.ec2.protocols.AwsParseAMI
+  (ami-info [service ami-id]
+    (-> (pallet.compute.ec2/image-info service ami-id image-info)
+        ami/parse))
+
   pallet.environment.Environment
   (environment [_] environment)
 
@@ -447,6 +476,10 @@
   (node-taggable? [compute node]
     (when (.tag_provider compute)
       (compute/node-taggable? (.tag_provider compute) node)))
+
+  pallet.compute.ComputeServiceProperties
+  (service-properties [compute]
+    (assoc (bean compute) :provider :pallet-ec2))
 
   impl/AwsExecute
   (execute [compute command args]
