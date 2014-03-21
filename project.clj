@@ -5,6 +5,6 @@
   :scm {:url "git@github.com:pallet/pallet-aws.git"}
   :dependencies [[com.palletops/pallet-aws-ops "0.1.0"
                   :exclusions [commons-logging]]
-                 [com.palletops/pallet "0.8.0-RC.7"]
+                 [com.palletops/pallet "0.8.0-RC.9"]
                  [org.clojure/core.match "0.2.0"
                   :exclusions [org.clojure/clojure]]])

@@ -17,4 +17,5 @@
   :set-version
   {:updates [{:path "README.md" :no-snapshot true}]}}
  :no-checkouts {:checkout-shares ^:replace []} ; disable checkouts
- :clojure-1.5.0 {:dependencies [[org.clojure/clojure "1.5.0"]]}}
+ :clojure-1.5 {:dependencies [[org.clojure/clojure "1.5.1"]]}
+ :clojure-1.6 {:dependencies [[org.clojure/clojure "1.6.0-RC.1"]]}}
