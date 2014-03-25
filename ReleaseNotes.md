@@ -1,3 +1,10 @@
+## 0.2.1
+
+- Add blobstore implementation
+  Adds the :pallet-s3 provider for blobstore.
+
+  Closes #4
+
 # 0.2.0
 
 - Update to pallet 0.8.0-RC.9
