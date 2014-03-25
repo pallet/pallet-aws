@@ -1,5 +1,7 @@
 # Pallet AWS Provider
 
+[![Build Status](https://travis-ci.org/pallet/pallet-aws.svg?branch=0.2.1)](https://travis-ci.org/pallet/pallet-aws)
+
 A [pallet](http://palletops.com/) provider for [AWS](http://aws.amazon.com/), based on
 the Amazon java SDK.
 
