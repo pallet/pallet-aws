@@ -157,6 +157,26 @@ associate with the instances.
 : The name of the IAM Instance Profile (IIP) to associate with the
 instances.
 
+An example node-spec might look like:
+
+``` clj
+;; Remember to use the "Instance Profile ARN"
+(def ^:private instance-arn
+  "arn:aws:iam::000000000000:instance-profile/SomeName")
+
+(def iam-node
+  (node-spec
+   :image {:os-family :ubuntu
+           :os-version-matches "12.04"
+           :os-64-bit true
+           :image-id "us-east-1/ami-e2861d8b"}
+   :hardware {:min-cores 2 :min-ram 512}
+   :network {:inbound-ports [22 1234]}
+   :qos {:enable-monitoring true}
+   :provider
+   {:pallet-ec2 {:iam-instance-profile {:name instance-arn}}}))
+```
+
 ### Other
 
 The `[:provider :pallet-ec2]` path can be used to specify other EC2
