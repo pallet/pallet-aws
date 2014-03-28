@@ -25,9 +25,9 @@ key in the node-spec's `:image`.
 
 ```clj
 (node-spec ... :image {:image-id "ami-35792c5c"
-                                 :os-family :ubuntu
-                                 :os-version "13.10"
-                                 :login-user "ubuntu"})
+                                 :os-family :amzn-linux
+                                 :os-version "2013.09"
+                                 :login-user "ec2-user"})
 ```
 
 You must specify the `:os-family`, `:os-version` and `:login-user`
