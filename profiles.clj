@@ -7,7 +7,9 @@
                  [lein-pallet-release "0.1.3"]]
        :pallet-release
        {:url "https://pbors:${GH_TOKEN}@github.com/pallet/pallet-aws.git",
-        :branch "master"}}
+        :branch "master"}
+       :injections [(require 'pallet.log)
+                    (pallet.log/default-log-config)]}
  :doc {:dependencies [[com.palletops/pallet-codox "0.1.0"]]
        :codox {:writer codox-md.writer/write-docs
                :output-dir "doc/0.1/api"

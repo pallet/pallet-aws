@@ -1,26 +1,34 @@
 (ns pallet.compute.ec2
   "Amazon ec2 provider for pallet"
+  (:refer-clojure :exclude [proxy])
   (:require
-   [clojure.core.async :refer [alts!! chan timeout]]
+   [clojure.core.async :as async :refer [<! alts!! chan timeout]]
    [clojure.string :as string]
-   [clojure.tools.logging :as logging :refer [debugf warnf infof]]
+   [taoensso.timbre :refer [debugf warnf infof tracef]]
    [com.palletops.awaze.ec2 :as ec2]
    [com.palletops.aws.api :as aws]
    [com.palletops.aws.instance-poller :as poller]
-   [pallet.action-plan :as action-plan]
+   [com.palletops.aws.keypair :refer [ensure-keypair]]
+   [com.palletops.aws.security-group
+    :refer [ensure-security-group open-security-group-port]]
    [pallet.compute :as compute]
    [pallet.compute.ec2.ami :as ami]
-   [pallet.compute.ec2.protocols :as impl]
+   [pallet.compute.ec2.protocols :as ec2-impl]
    [pallet.compute.ec2.static :as static]
    [pallet.compute.implementation :as implementation]
-   [pallet.execute :as execute]
+   [pallet.compute.protocols :as impl]
+   [pallet.core.context :refer [with-domain]]
+   [pallet.exception :refer [combine-exceptions]]
    [pallet.feature :refer [if-feature has-feature?]]
    [pallet.node :as node]
    [pallet.script :as script]
    [pallet.ssh.execute :refer [ssh-script-on-target]]
    [pallet.stevedore :as stevedore]
+   [pallet.user :refer [UserUnconstrained]]
    [pallet.utils :refer [deep-merge map-seq maybe-assoc]]
-   pallet.environment))
+   [pallet.utils.async :refer [from-chan go-try]]
+   pallet.environment
+   [schema.core :refer [validate]]))
 
 
 ;;; Meta
@@ -30,14 +38,14 @@
 ;;; ## Nodes
 
 ;;; ### Tags
-(def pallet-group-tag "pallet-group")
+(def pallet-name-tag "pallet-name")
 (def pallet-image-tag "pallet-image")
 (def pallet-state-tag "pallet-state")
 
-(defn group-tag
+(defn base-name-tag
   "Return the group tag for a group"
-  [group-spec]
-  {:key pallet-group-tag :value (name (:group-name group-spec))})
+  [node-name]
+  {:key pallet-name-tag :value (name node-name)})
 
 (defn image-tag
   "Return the image tag for a group"
@@ -48,13 +56,13 @@
                     :image
                     (select-keys
                      [:image-id :os-family :os-version :os-64-bit
-                      :login-user]))))})
+                      :login-user :packager]))))})
 
 (defn name-tag
   "Return the group tag for a group"
-  [group-spec ip]
+  [node-name ip]
   {:key "Name"
-   :value (str (name (:group-name group-spec))
+   :value (str (name node-name)
                "_" (string/replace (or ip "noip") #"\." "-"))})
 
 (defn state-tag
@@ -92,22 +100,13 @@
 (def instance-ip (some-fn :public-ip-address :private-ip-address))
 
 (defn instance-tags
-  [group-spec instance]
-  [(group-tag group-spec)
-   (image-tag group-spec)
-   (name-tag group-spec (instance-ip instance))])
+  [node-name node-spec instance]
+  [(base-name-tag node-name)
+   (image-tag node-spec)
+   (name-tag node-name (instance-ip instance))])
 
 (defn id-tags [instance tags]
   (map #(vector (:instance-id instance) %) tags))
-
-(defn tag-instances-for-group-spec
-  "Returns a sequence of instance infos with tags applied"
-  [credentials api group-spec instances]
-  (debugf "tag-instances-for-group-spec %s %s" group-spec (count instances))
-  (let [tags (map #(instance-tags group-spec %) instances)
-        id-tags (mapcat id-tags instances tags)]
-    (tag-instances credentials api id-tags)
-    (map #(update-in %1 [:tags] concat %2) instances tags)))
 
 (defn tag-instance-state
   "Update the instance's state"
@@ -120,11 +119,11 @@
 
 (defn execute
   [service command args]
-  (impl/execute service command args))
+  (ec2-impl/execute service command args))
 
 (defn ami-info
   [service ami-id]
-  (impl/ami-info service ami-id))
+  (ec2-impl/ami-info service ami-id))
 
 (defn image-info [service ami image-atom]
   (if-let [i @image-atom]
@@ -136,47 +135,73 @@
              first))))
 
 ;;; ### Node
-(deftype Ec2Node [service info image]
-  pallet.node/Node
-  (ssh-port [node] 22)
-  (primary-ip [node] (:public-ip-address info))
-  (private-ip [node] (:private-ip-address info))
-  (is-64bit? [node] (= "x86_64" (:architecture info)))
-  (group-name [node] (get-tag info pallet-group-tag))
-  (os-family [node] (:os-family (node-image-value info)))
-  (os-version [node] (:os-version (node-image-value info)))
-  (hostname [node] (:public-dns-name info))
-  (id [node] (:instance-id info))
-  (running? [node] (= "running" (-> info :state :name)))
-  (terminated? [node] (#{"terminated" "shutting-down"}
-                       (-> info :state :name)))
-  (compute-service [node] service)
-  pallet.node/NodePackager
-  (packager [node] nil)
-  pallet.node/NodeImage
-  (image-user [node] {:username (:login-user (node-image-value info))})
-  pallet.node/NodeHardware
-  (hardware [node]
+;; deftype Ec2Node [service info image]
+(defn ssh-port [info] 22)
+(defn primary-ip [info] (:public-ip-address info))
+(defn private-ip [info] (:private-ip-address info))
+(defn is-64bit? [info] (= "x86_64" (:architecture info)))
+
+
+;; (group-name [node] (get-tag info pallet-group-tag))
+(defn os-family [info] (:os-family (node-image-value info)))
+(defn os-version [info] (:os-version (node-image-value info)))
+(defn hostname [info] (:public-dns-name info))
+(defn id [info] (:instance-id info))
+
+
+(defn run-state [info]
+  (let [state (-> info :state :name)]
+    (case state
+      "pending" :running
+      "running" :running
+      "shutting-down" :stopped
+      "terminated" :terminated
+      "stopping" :stopped
+      "stopped" :stopped)))
+
+;; (defn running? [node] (= "running" (-> info :state :name)))
+;; (terminated? [node] (#{"terminated" "shutting-down"}
+;;                        (-> info :state :name)))
+
+(defn packager [info] (:packager (node-image-value info)))
+
+(defn image-user [info]
+  {:post [(validate UserUnconstrained %)]}
+  {:username
+   (:login-user (node-image-value info))
+   })
+
+(defn hardware [info]
     (let [id (keyword (:instance-type info))]
       (merge
        (select-keys (static/instance-types id) [:ram :cpus])
        {:id id
         :disks (:block-device-mappings info)
         :nics (:network-interfaces info)})))
-  pallet.node/NodeProxy
-  (proxy [node] nil))
 
-(defn bootstrapped?
-  "Predicate for testing if a node is bootstrapped."
-  [node]
-  (:bs (node-state-value (.info node))))
+(defn proxy [node] nil)
+
+(defn node-map
+  [info compute-service]
+  (-> {:id (id info)
+       :primary-ip (primary-ip info)
+       :hostname (hostname info)
+       :run-state (run-state info)
+       :os-family (os-family info)
+       :os-version (os-version info)
+       :packager (packager info)
+       :ssh-port 22
+       :hardware (hardware info)
+       :image-user (image-user info)
+       :compute-service compute-service}
+      (maybe-assoc :proxy (proxy info))))
 
 
 ;;; implementation detail names
 (defn security-group-name
   "Return the security group name for a group"
-  [group-spec]
-  (str "pallet-" (name (:group-name group-spec))))
+  [node-name]
+  (str "pallet-" (name node-name)))
 
 (defn user-keypair-name
   [user]
@@ -184,51 +209,58 @@
 
 
 ;;; Compute service
-(defn ensure-keypair [credentials api key-name user]
-  (let [key-pairs (try (aws/execute
-                        api (ec2/describe-key-pairs-map
-                             credentials
-                             {:key-names [key-name]}))
-                       (catch com.amazonaws.AmazonServiceException _))]
-    (debugf "ensure-keypair existing %s" key-pairs)
-    (when (zero? (count key-pairs))
-      (infof "Keypair '%s' not present. Creating it..." key-name)
-      (aws/execute
-       api
-       (ec2/import-key-pair-map
-        credentials
-        {:key-name key-name
-         :public-key-material (slurp (:public-key-path user))}))
-      (infof "Keypair '%s' created." key-name ))))
+;; (defn ensure-keypair [credentials api key-name user]
+;;   (let [key-pairs (try (aws/execute
+;;                         api (ec2/describe-key-pairs-map
+;;                              credentials
+;;                              {:key-names [key-name]}))
+;;                        (catch com.amazonaws.AmazonServiceException _))]
+;;     (debugf "ensure-keypair existing %s" key-pairs)
+;;     (when (zero? (count key-pairs))
+;;       (infof "Keypair '%s' not present. Creating it..." key-name)
+;;       (aws/execute
+;;        api
+;;        (ec2/import-key-pair-map
+;;         credentials
+;;         {:key-name key-name
+;;          :public-key-material (slurp (:public-key-path user))}))
+;;       (infof "Keypair '%s' created." key-name ))))
 
-(defn ensure-security-group [credentials api security-group-name]
-  (let [sgs (try
-              (aws/execute
-               api
-               (ec2/describe-security-groups-map
-                credentials {:group-names [security-group-name]}))
-              (catch com.amazonaws.AmazonServiceException e))]
-    (debugf "ensure-security-group existing %s" (pr-str sgs))
-    (when-not (seq sgs)
-      (infof "Security group '%s' not present. Creating it..." security-group-name)
-      (aws/execute
-       api
-       (ec2/create-security-group-map
-        credentials
-        {:group-name security-group-name
-         :description
-         (str "Pallet created group for " security-group-name)}))
-      (infof "Security group '%s' created. Opening SSH port..." security-group-name)
-      (aws/execute
-       api
-       (ec2/authorize-security-group-ingress-map
-        credentials
-        {:group-name security-group-name
-         :ip-permissions [{:ip-protocol "tcp"
-                           :from-port 22
-                           :to-port 22
-                           :ip-ranges ["0.0.0.0/0"]}]}))
-      (infof "SSH port is open for group '%s'" security-group-name))))
+;; (defn ensure-security-group [credentials api security-group-name]
+;;   (let [sgs (try
+;;               (aws/execute
+;;                api
+;;                (ec2/describe-security-groups-map
+;;                 credentials {:group-names [security-group-name]}))
+;;               (catch com.amazonaws.AmazonServiceException e))]
+;;     (debugf "ensure-security-group existing %s" (pr-str sgs))
+;;     (when-not (seq sgs)
+;;       (infof "Security group '%s' not present. Creating it..." security-group-name)
+;;       (aws/execute
+;;        api
+;;        (ec2/create-security-group-map
+;;         credentials
+;;         {:group-name security-group-name
+;;          :description
+;;          (str "Pallet created group for " security-group-name)}))
+;;       (infof "Security group '%s' created. Opening SSH port..." security-group-name)
+;;       (aws/execute
+;;        api
+;;        (ec2/authorize-security-group-ingress-map
+;;         credentials
+;;         {:group-name security-group-name
+;;          :ip-permissions [{:ip-protocol "tcp"
+;;                            :from-port 22
+;;                            :to-port 22
+;;                            :ip-ranges ["0.0.0.0/0"]}]}))
+;;       (infof "SSH port is open for group '%s'" security-group-name))))
+
+              ;; security-group (if (seq security-group)
+              ;;                  security-group
+              ;;                  (let [security-group (security-group-name
+              ;;                                        node-name)]
+
+              ;;                    security-group))
 
 (defn- get-tags [credentials api node]
   (let [tags (aws/execute
@@ -240,7 +272,7 @@
     (into {} (map (juxt :key :value) (:tags tags)))))
 
 (deftype Ec2NodeTag [credentials api]
-  pallet.compute.NodeTagReader
+  pallet.compute.protocols/NodeTagReader
   (node-tag [_ node tag-name]
     (debugf "node-tag %s %s" (node/id node) tag-name)
     (let [tags (get-tags credentials api node)]
@@ -256,7 +288,7 @@
     (debugf "node-tags %s" (node/id node))
     (get-tags credentials api node))
 
-  pallet.compute.NodeTagWriter
+  pallet.compute.protocols/NodeTagWriter
   (tag-node! [_ node tag-name value]
     (debugf "tag-node! %s %s %s" (node/id node) tag-name value)
     (aws/execute
@@ -272,12 +304,6 @@
 (defn- instances-response->instances
   [instances]
   (mapcat :instances (:reservations instances)))
-
-(defn hardware-name [id]
-  (when id
-    (->> (string/split id #"\.")
-         (map string/capitalize)
-         string/join)))
 
 (defn launch-options
   [node-count group-spec security-group key-name]
@@ -298,204 +324,212 @@
        :key-name key-name
        :security-groups [security-group]}
       (maybe-assoc :placement placement)
-      (maybe-assoc :instance-type
-                   (if-let [id (-> node-spec :hardware :hardware-id)]
-                     (hardware-name id)))))))
+      (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
 
 (deftype Ec2Service
     [credentials api image-info environment instance-poller tag-provider]
-  pallet.compute.ComputeService
 
-  (nodes [service]
-    (debugf "getting nodes")
-    (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
-      (let [instances (aws/execute
-                       api (ec2/describe-instances-map credentials {}))]
-        (map make-node (instances-response->instances instances)))))
+  pallet.core.protocols/Closeable
+  (close [_]
+    (poller/stop instance-poller))
 
-  (ensure-os-family [_ {:keys [image group-name] :or {image {}} :as group-spec}]
-    (when-not (:image-id image)
-      (throw
-       (ex-info
-        (format "Group-spec %s :image does not specify an :image-id" group-name)
-        {:group-spec group-spec
-         :reason :no-image-id})))
-    (if-let [missing-keys (seq (remove image [:os-family :os-version :user]))]
-      (let [response (aws/execute
-                      api
-                      (ec2/describe-images-map
-                       credentials {:image-ids [(:image-id image)]}))]
-        (debugf "ensure-os-family images %s" response)
-        (if-let [images (:images response)]
-          (let [image (first images)]
-            (let [image-details (ami/parse image)
-                  group-spec (update-in
-                              group-spec [:image]
-                              (fn [image] (merge image-details image)))]
-              (if (every? (:image group-spec) missing-keys)
-                (do
-                  (logging/warnf
-                   (str
-                    "group-spec %s :image does not specify the keys %s. "
-                    "Inferred %s from the AMI %s with name \"%s\".")
-                   group-name (vec missing-keys)
-                   (zipmap missing-keys (map (:image group-spec) missing-keys))
-                   (:image-id image) (:name image))
-                  group-spec)
-                (let [missing (vec (remove (:image group-spec) missing-keys))]
-                  (throw
-                   (ex-info
-                    (format
-                     (str "group-spec %s :image does not specify the keys %s. "
-                          "Could not infer %s from the AMI %s with name %s.")
-                     group-name (vec missing-keys) missing (:name image))
-                    {:group-spec group-spec
-                     :image-name (:name image)
-                     :image-id (:image-id image)
-                     :missing-keys missing}))))))
-          (throw
-           (ex-info
-            (format "Image %s not found" (:image-id image))
-            {:image-id (:image-id image)
-             :reason :image-not-found}))))
-      group-spec))
 
-  (run-nodes [service group-spec node-count user init-script options]
-    (when-not (every? (:image group-spec) [:os-family :os-version :login-user])
+  pallet.compute.protocols.ComputeService
+  (nodes [service ch]
+    (with-domain :ec2
+      (go-try ch
+        (debugf "nodes")
+        (let [instances (aws/execute
+                         api (ec2/describe-instances-map credentials {}))]
+          (>! ch {:targets (map
+                            #(node-map % service)
+                            (instances-response->instances instances))})))))
+
+  pallet.compute.protocols/ComputeServiceNodeCreateDestroy
+
+  (images [_ ch]
+    (with-domain :ec2
+      (go-try ch
+        (>! ch {:images @image-info}))))
+
+
+  (create-nodes [service node-spec user node-count
+                 {:keys [node-name] :as options} ch]
+    (when-not (every? (:image node-spec) [:os-family :os-version :login-user])
       (throw
        (ex-info
         "node-spec :image must contain :os-family :os-version :login-user keys"
-        {:supplied (select-keys (:image group-spec)
+        {:supplied (select-keys (:image node-spec)
                                 [:os-family :os-version :login-user])})))
-    (debugf "run-nodes %s %s %s"
-            (:group-name group-spec) node-count (:image group-spec))
-    (let [key-name (-> group-spec :image :key-name)
-          key-name (if key-name
-                     key-name
-                     (let [key-name (user-keypair-name user)]
-                       (ensure-keypair credentials api key-name user)
-                       key-name))
-          security-group (-> group-spec :node-spec :config :security-group)
-          security-group (if (seq security-group)
-                           security-group
-                           (let [security-group (security-group-name
-                                                 group-spec)]
-                             (ensure-security-group
-                              credentials api security-group)
-                             security-group))]
-      (debugf "run-nodes %s nodes" node-count)
-      (infof "Creating %s node(s) in group '%s'..."
-             node-count (name (:group-name group-spec)))
-      (let [options (launch-options
-                     node-count group-spec security-group key-name)
-            resp (ec2/run-instances credentials options)]
-        (debugf "run-nodes run-instances options %s" options)
-        (debugf "run-nodes run-instances %s" resp)
-        (debugf "run-nodes %s" (pr-str (-> resp :reservation :instances)))
-        (letfn [(make-node [info] (Ec2Node. service info (atom nil)))]
-          (when-let [instances (seq (-> resp :reservation :instances))]
-            (let [ids (map :instance-id instances)
-                  notify-fn #(not= "pending" (-> % :state :name))
-                  channel (chan)
-                  idmaps (into {}
-                               (map
-                                #(vector % [{:channel channel
-                                             :notify-when-f notify-fn}])
-                                ids))]
-              ;; Wait for the nodes to come up
-              (poller/add-instances instance-poller idmaps)
-              (debugf "run-nodes Polling instances %s" idmaps)
-              (let [timeout (timeout (* 5 60 1000))
-                    instances (->> (for [_ (range (count idmaps))]
-                                     (first (alts!! [channel timeout])))
-                                   (remove nil?))
-                    running? (fn [node] (= "running" (-> node :state :name)))
-                    _ (debugf "run-nodes Waiting for instances to come up")
-                    good-instances (filter running? instances)]
-                (when-let [failed (seq
-                                   (filter (complement running?) instances))]
-                  (warnf "run-nodes Nodes failed to start %s" (vec failed))
-                  (warnf
-                   "%s of %s node(s) failed to start for group '%s'"
-                   (count failed) node-count (name (:group-name group-spec)))
-                  (aws/execute api
-                               (ec2/terminate-instances-map
-                                credentials
-                                {:instance-ids (mapv :instance-id failed)})))
-                (when (not= (count instances) (count idmaps))
-                  (warnf "run-nodes Nodes still pending: %s"
-                         (- (count idmaps) (count instances))))
-                (infof "Created %s node(s) in group '%s' (%s node(s) requested)"
-                       (count good-instances)
-                       (name (:group-name group-spec))
-                       node-count)
-                (debugf "run-nodes Tagging")
-                (->> good-instances
-                     (tag-instances-for-group-spec credentials api group-spec)
-                     (map make-node)))))))))
+    (with-domain :ec2
+      (go-try ch
+        (debugf "create-nodes %s %s %s" node-count (:image node-spec) node-name)
+        (let [[kp? key-name] (if-let [key-name (-> node-spec :image :key-name)]
+                               [nil key-name]
+                               [true (user-keypair-name user)])
+              [sg? security-group] (if-let [security-group
+                                            (-> node-spec :node-spec
+                                                :config :security-group)]
+                                     [nil security-group]
+                                     [true (security-group-name node-name)])
 
-  (reboot [_ nodes])
+              c (chan)
+              cs (chan)
+              n (count (filter identity [kp? sg?]))]
+          (when kp?
+            (let [key-material (or (:public-key-path user)
+                                   (slurp (:public-key-path user)))]
+              (ensure-keypair api credentials key-name key-material c)))
+          (when sg?
+            (ensure-security-group
+             api credentials security-group
+             {:description (str "Pallet created group for " (name node-name))}
+             cs)
+            (let [{:keys [exception] :as r} (<! cs)]
+              (if exception
+                (>! c r)
+                (open-security-group-port
+                 api credentials security-group 22 c))))
 
-  (boot-if-down [_ nodes])
+          (if-let [e (combine-exceptions
+                      (map :exception (from-chan (async/take n c))))]
+            (>! ch {:exception e})
+            (let [options (launch-options
+                           node-count node-spec security-group key-name)]
+              (debugf "run-nodes %s nodes" node-count)
+              (infof "Creating %s node(s) with name '%s'..."
+                     node-count (name node-name))
+              (aws/submit api (ec2/run-instances-map credentials options) c)
+              (let [resp (<! c)]
+                (debugf "run-nodes run-instances options %s" options)
+                (debugf "run-nodes run-instances %s" resp)
+                (debugf "run-nodes %s"
+                        (pr-str (-> resp :reservation :instances)))
+                (when-let [instances (seq (-> resp :reservation :instances))]
+                  (let [ids (map :instance-id instances)
+                        notify-fn #(not= "pending" (-> % :state :name))
+                        channel (chan)
+                        idmaps (into {}
+                                     (map
+                                      #(vector % [{:channel channel
+                                                   :notify-when-f notify-fn}])
+                                      ids))]
+                    ;; Wait for the nodes to come up
+                    (poller/add-instances instance-poller idmaps)
+                    (debugf "run-nodes Polling instances %s" idmaps)
+                    (debugf "run-nodes Waiting for instances to come up")
+                    (let [timeout (timeout (* 5 60 1000))
+                          instances (->> (for [_ (range (count idmaps))]
+                                           (first (alts!! [channel timeout])))
+                                         (remove nil?))
+                          running? (fn [node]
+                                     (= "running" (-> node :state :name)))
 
-  (shutdown-node [_ node user])
+                          good-instances (filter running? instances)]
+                      (when-let [failed (seq
+                                         (filter (complement running?)
+                                                 instances))]
+                        (warnf
+                         "run-nodes Nodes failed to start %s"
+                         (vec failed))
+                        (warnf
+                         "%s of %s node(s) failed to start for node-name '%s'"
+                         (count failed) node-count (name node-name))
+                        (aws/submit
+                         api
+                         (ec2/terminate-instances-map
+                          credentials
+                          {:instance-ids (mapv :instance-id failed)})))
+                      (when (not= (count instances) (count idmaps))
+                        (warnf "run-nodes Nodes still pending: %s"
+                               (- (count idmaps) (count instances))))
+                      (infof
+                       "Created %s node(s) for '%s' (%s node(s) requested)"
+                       (count good-instances) (name node-name) node-count)
+                      (debugf "run-nodes Tagging")
+                      (let [tags (map
+                                  #(instance-tags node-name node-spec %)
+                                  good-instances)
+                            id-tags (mapcat id-tags good-instances tags)
+                            good-instances (map
+                                            #(update-in %1 [:tags] concat %2)
+                                            good-instances tags)]
+                        (aws/submit
+                         api
+                         (ec2/create-tags-map
+                          credentials
+                          {:resources (map first id-tags)
+                           :tags (map second id-tags)})
+                         c)
+                        (>! ch
+                            (merge
+                             {:new-targets (map #(node-map % service)
+                                                good-instances)}
+                             (select-keys (<! c) [:exception]))))))))))))))
 
-  (shutdown [self nodes user])
+  (destroy-nodes [_ nodes ch]
+    (go-try ch
+      (let [c (aws/submit
+               api
+               (ec2/terminate-instances-map
+                credentials {:instance-ids (map node/id nodes)}))
+            r (<! c)]
+        (if (:exception r)
+          (>! ch r)
+          (>! ch {:old-targets nodes})))))
 
-  (destroy-nodes-in-group [_ group-name]
-    (let [nodes (aws/execute
-                 api
-                 (ec2/describe-instances-map
-                  credentials
-                  {:filter {:name (str "tag:" pallet-group-tag)
-                            :value [group-name]}}))]
-      (aws/execute
+
+  pallet.compute.protocols/ComputeServiceNodeStop
+  (stop-nodes
+    [compute nodes ch]
+    (with-domain :ec2
+      (aws/submit
        api
-       (ec2/terminate-instances-map
-        credentials
-        {:instance-ids
-         (map :instance-id (instances-response->instances nodes))}))))
+       (ec2/stop-instances
+        credentials {:instance-ids (map node/id nodes)})
+       ch)))
 
-  (destroy-node [_ node]
-    (aws/execute
-     api
-     (ec2/terminate-instances-map
-      credentials {:instance-id [(node/id node)]})))
+  (restart-nodes
+    [compute nodes ch]
+    (with-domain :ec2
+      (aws/submit
+       api
+       (ec2/start-instances
+        credentials {:instance-ids (map node/id nodes)})
+       ch)))
 
-  (images [_] @image-info)
+  ;; not implemented pallet.compute.protocols/ComputeServiceNodeSuspend
 
-  (close [_]
-    (poller/stop instance-poller))
 
   pallet.compute.ec2.protocols.AwsParseAMI
   (ami-info [service ami-id]
     (-> (pallet.compute.ec2/image-info service ami-id image-info)
         ami/parse))
 
-  pallet.environment.Environment
+  pallet.environment.protocols.Environment
   (environment [_] environment)
 
-  pallet.compute.NodeTagReader
+  pallet.compute.protocols.NodeTagReader
   (node-tag [compute node tag-name]
-    (compute/node-tag
+    (pallet.compute.protocols/node-tag
      (.tag_provider compute) node tag-name))
   (node-tag [compute node tag-name default-value]
-    (compute/node-tag
+    (pallet.compute.protocols/node-tag
      (.tag_provider compute) node tag-name default-value))
   (node-tags [compute node]
-    (compute/node-tags (.tag_provider compute) node))
-  pallet.compute/NodeTagWriter
+    (pallet.compute.protocols/node-tags (.tag_provider compute) node))
+  pallet.compute.protocols/NodeTagWriter
   (tag-node! [compute node tag-name value]
-    (compute/tag-node! (.tag_provider compute) node tag-name value))
+    (pallet.compute.protocols/tag-node! (.tag_provider compute) node tag-name value))
   (node-taggable? [compute node]
     (when (.tag_provider compute)
-      (compute/node-taggable? (.tag_provider compute) node)))
+      (pallet.compute.protocols/node-taggable? (.tag_provider compute) node)))
 
-  pallet.compute.ComputeServiceProperties
+  pallet.compute.protocols.ComputeServiceProperties
   (service-properties [compute]
     (assoc (bean compute) :provider :pallet-ec2))
 
-  impl/AwsExecute
+  ec2-impl/AwsExecute
   (execute [compute command args]
     (aws/execute api (command credentials args))))
 
