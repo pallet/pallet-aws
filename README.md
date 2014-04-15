@@ -1,5 +1,7 @@
 # Pallet AWS Provider
 
+[![Build Status](https://travis-ci.org/pallet/pallet-aws.svg?branch=0.2.2)](https://travis-ci.org/pallet/pallet-aws)
+
 A [pallet](http://palletops.com/) provider for [AWS](http://aws.amazon.com/), based on
 the Amazon java SDK.
 
@@ -10,8 +12,15 @@ The EC2 provider uses the `:pallet-ec2` key.
 Add the following to your dependencies:
 
 ```clj
-[com.palletops/pallet-aws "0.2.1"]
+[com.palletops/pallet-aws "0.2.2"]
 ```
+
+The underlying AWS SDK uses `commons-logging` for logging.  This means
+you will need to add a dependency that provides the commons logging
+interface.  Use `[commons-logging "1.1.3"]` if you want to use commons
+logging, or `[org.slf4j/jcl-over-slf4j "1.7.5"]` if you are using slf4
+(eg. with logback).
+
 ## Node-Spec Options
 
 The `node-spec` can be used to control EC2 specific features:
@@ -23,9 +32,9 @@ key in the node-spec's `:image`.
 
 ```clj
 (node-spec ... :image {:image-id "ami-35792c5c"
-                                 :os-family :ubuntu
-                                 :os-version "13.10"
-                                 :login-user "ubuntu"})
+                                 :os-family :amzn-linux
+                                 :os-version "2013.09"
+                                 :login-user "ec2-user"})
 ```
 
 You must specify the `:os-family`, `:os-version` and `:login-user`
@@ -156,6 +165,26 @@ associate with the instances.
 `:name`
 : The name of the IAM Instance Profile (IIP) to associate with the
 instances.
+
+An example node-spec might look like:
+
+``` clj
+;; Remember to use the "Instance Profile ARN"
+(def ^:private instance-arn
+  "arn:aws:iam::000000000000:instance-profile/SomeName")
+
+(def iam-node
+  (node-spec
+   :image {:os-family :ubuntu
+           :os-version-matches "12.04"
+           :os-64-bit true
+           :image-id "us-east-1/ami-e2861d8b"}
+   :hardware {:min-cores 2 :min-ram 512}
+   :network {:inbound-ports [22 1234]}
+   :qos {:enable-monitoring true}
+   :provider
+   {:pallet-ec2 {:iam-instance-profile {:name instance-arn}}}))
+```
 
 ### Other
 
