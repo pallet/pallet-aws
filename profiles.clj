@@ -4,7 +4,7 @@
                                         :compile-path]
        :plugins [[codox/codox.leiningen "0.6.4"]
                  [lein-marginalia "0.7.1"]
-                 [lein-pallet-release "0.1.3"]]
+                 [lein-pallet-release "RELEASE"]]
        :pallet-release
        {:url "https://pbors:${GH_TOKEN}@github.com/pallet/pallet-aws.git",
         :branch "master"}}
