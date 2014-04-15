@@ -1,3 +1,15 @@
+## 0.2.2
+
+- Fix destroy-node implementation
+  Was incorrectly using :instance-id rather than :instance-ids.
+
+- Remove hardware-name
+  The name is translated in awaze, so can be passed directly here.
+
+  Closes #1
+
+- Update to pallet-aws-ops 0.2.0
+
 ## 0.2.1
 
 - Add blobstore implementation
