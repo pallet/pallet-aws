@@ -20,11 +20,12 @@
           :max-count 1,
           :min-count 1,
           :image-id "i"
-          :instance-type "M1Small"}
+          :instance-type "m1.small"}
          (launch-options
           1
-          (group-spec :gn :node-spec (node-spec :hardware {:hardware-id "m1.small"}
-                                                :image {:image-id "i"}))
+          (group-spec :gn
+            :node-spec (node-spec :hardware {:hardware-id "m1.small"}
+                                  :image {:image-id "i"}))
           "sg" "kn"))
       "hardware id test")
   (is (= {:security-groups ["sg"],

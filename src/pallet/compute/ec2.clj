@@ -273,12 +273,6 @@
   [instances]
   (mapcat :instances (:reservations instances)))
 
-(defn hardware-name [id]
-  (when id
-    (->> (string/split id #"\.")
-         (map string/capitalize)
-         string/join)))
-
 (defn launch-options
   [node-count group-spec security-group key-name]
   (let [node-spec group-spec
@@ -298,9 +292,7 @@
        :key-name key-name
        :security-groups [security-group]}
       (maybe-assoc :placement placement)
-      (maybe-assoc :instance-type
-                   (if-let [id (-> node-spec :hardware :hardware-id)]
-                     (hardware-name id)))))))
+      (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
 
 (deftype Ec2Service
     [credentials api image-info environment instance-poller tag-provider]
