@@ -1,6 +1,6 @@
 # Pallet AWS Provider
 
-[![Build Status](https://travis-ci.org/pallet/pallet-aws.svg?branch=0.2.2)](https://travis-ci.org/pallet/pallet-aws)
+[![Build Status](https://travis-ci.org/pallet/pallet-aws.svg?branch=0.2.3)](https://travis-ci.org/pallet/pallet-aws)
 
 A [pallet](http://palletops.com/) provider for [AWS](http://aws.amazon.com/), based on
 the Amazon java SDK.
@@ -12,8 +12,11 @@ The EC2 provider uses the `:pallet-ec2` key.
 Add the following to your dependencies:
 
 ```clj
-[com.palletops/pallet-aws "0.2.2"]
+[com.palletops/pallet-aws "0.2.3"]
 ```
+
+Warning: versions 0.2.2 and prior contain a nasty bug that will remove
+all the nodes in your account if you converge any group down to 0 nodes.
 
 The underlying AWS SDK uses `commons-logging` for logging.  This means
 you will need to add a dependency that provides the commons logging

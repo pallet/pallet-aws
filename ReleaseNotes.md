@@ -1,3 +1,11 @@
+## 0.2.3
+
+- Fix bug in destroy-nodes-in-group
+  The bug would remove all noes in an account when any group was converged 
+  to 0 nodes.
+
+  Closes #7
+
 ## 0.2.2
 
 - Fix destroy-node implementation
