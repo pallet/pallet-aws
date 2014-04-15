@@ -439,8 +439,8 @@
                  api
                  (ec2/describe-instances-map
                   credentials
-                  {:filter {:name (str "tag:" pallet-group-tag)
-                            :value [group-name]}}))]
+                  {:filters [{:name (str "tag:" pallet-group-tag)
+                              :values [group-name]}]}))]
       (aws/execute
        api
        (ec2/terminate-instances-map

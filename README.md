@@ -15,6 +15,9 @@ Add the following to your dependencies:
 [com.palletops/pallet-aws "0.2.2"]
 ```
 
+Warning: versions 0.2.2 and prior contain a nasty bug that will remove
+all the nodes in your account if you converge any group down to 0 nodes.
+
 The underlying AWS SDK uses `commons-logging` for logging.  This means
 you will need to add a dependency that provides the commons logging
 interface.  Use `[commons-logging "1.1.3"]` if you want to use commons
