@@ -1,4 +1,4 @@
-(defproject com.palletops/pallet-aws "0.2.3-SNAPSHOT"
+(defproject com.palletops/pallet-aws "0.2.3"
   :description "A provider for using Pallet with AWS EC2, based on the AWS SDK."
   :url "http://palletops.com"
   :license {:name "All rights reserved"}
