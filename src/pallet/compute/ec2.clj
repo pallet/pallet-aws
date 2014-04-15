@@ -452,7 +452,7 @@
     (aws/execute
      api
      (ec2/terminate-instances-map
-      credentials {:instance-id [(node/id node)]})))
+      credentials {:instance-ids [(node/id node)]})))
 
   (images [_] @image-info)
 
