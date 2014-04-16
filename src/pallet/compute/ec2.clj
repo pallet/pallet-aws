@@ -560,15 +560,14 @@
 
 ;; service factory implementation for ec2
 (defmethod implementation/service :pallet-ec2
-  [provider {:keys [identity credential endpoint environment tag-provider
+  [provider {:keys [identity credential region environment tag-provider
                     api poller]
-             :or {endpoint "US_EAST_1"}
+             :or {region "US_EAST_1"}
              :as options}]
   (let [options (dissoc
                  options
                  :identity :credential :extensions :blobstore :environment)
-        credentials {:access-key identity :secret-key credential
-                     :endpoint endpoint}
+        credentials {:access-key identity :secret-key credential :region region}
         api (or api (aws/start {}))
         poller (or poller (poller/start
                            {:credentials credentials
