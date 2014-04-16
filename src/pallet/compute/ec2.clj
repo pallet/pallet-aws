@@ -535,6 +535,29 @@
     (aws/execute api (command credentials args))))
 
 
+(defn regions
+  "Return the ec2 regions for a service."
+  [service]
+  (->> (execute service ec2/describe-regions-map {})
+       :regions
+       (map :region-name)))
+
+(defn availability-zones
+  "Return the ec2 zones for the current region.  Returns a sequence of maps
+  with :zone-name, :region-name and :messages keys."
+  [service]
+  (->> (execute service ec2/describe-availability-zones-map {})
+       :availability-zones))
+
+(defn region
+  "Return the current region name."
+  [service]
+  (let [regions (->> (availability-zones service)
+                     (map :region-name)
+                     distinct)]
+    (assert (= 1 (count regions)))
+    (first regions)))
+
 ;; service factory implementation for ec2
 (defmethod implementation/service :pallet-ec2
   [provider {:keys [identity credential endpoint environment tag-provider
