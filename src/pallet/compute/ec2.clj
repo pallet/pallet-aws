@@ -193,7 +193,8 @@
        :ssh-port 22
        :hardware (hardware info)
        :image-user (image-user info)
-       :compute-service compute-service}
+       :compute-service compute-service
+       :provider-data info}
       (maybe-assoc :proxy (proxy info))))
 
 
