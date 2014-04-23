@@ -307,19 +307,18 @@
   (mapcat :instances (:reservations instances)))
 
 (defn launch-options
-  [node-count group-spec security-group key-name]
-  (let [node-spec group-spec
-        placement (-> {}
+  [node-count node-spec security-group key-name]
+  (let [placement (-> {}
                       (maybe-assoc
                        :availability-zone
                        (-> node-spec :location :location-id))
                       (merge (-> node-spec :provider :pallet-ec2 :placement))
                       map-seq)]
     (deep-merge
-     (select-keys (-> group-spec :node-spec :image) [:image-id])
+     (select-keys (-> node-spec :node-spec :image) [:image-id])
      (dissoc (-> node-spec :provider :pallet-ec2) :placement)
      (->
-      {:image-id (-> group-spec :image :image-id)
+      {:image-id (-> node-spec :image :image-id)
        :min-count node-count
        :max-count node-count
        :key-name key-name
@@ -369,8 +368,8 @@
                                [nil key-name]
                                [true (user-keypair-name user)])
               [sg? security-group] (if-let [security-group
-                                            (-> node-spec :node-spec
-                                                :config :security-group)]
+                                            (-> node-spec :network
+                                                :security-groups first)]
                                      [nil security-group]
                                      [true (security-group-name node-name)])
 
