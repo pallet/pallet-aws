@@ -405,7 +405,7 @@
                 (debugf "run-nodes run-instances %s" resp)
                 (debugf "run-nodes %s"
                         (pr-str (-> resp :reservation :instances)))
-                (when-let [instances (seq (-> resp :reservation :instances))]
+                (if-let [instances (seq (-> resp :reservation :instances))]
                   (let [ids (map :instance-id instances)
                         notify-fn #(not= "pending" (-> % :state :name))
                         channel (chan)
@@ -465,7 +465,8 @@
                             (merge
                              {:new-targets (map #(node-map % service)
                                                 good-instances)}
-                             (select-keys (<! c) [:exception]))))))))))))))
+                             (select-keys (<! c) [:exception]))))))
+                  (>! ch resp)))))))))
 
   (destroy-nodes [_ nodes ch]
     (go-try ch
