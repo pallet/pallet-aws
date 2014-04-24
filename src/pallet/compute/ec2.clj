@@ -13,6 +13,7 @@
    [pallet.compute.ec2.protocols :as impl]
    [pallet.compute.ec2.static :as static]
    [pallet.compute.implementation :as implementation]
+   [pallet.environment]
    [pallet.execute :as execute]
    [pallet.feature :refer [if-feature has-feature?]]
    [pallet.node :as node]
@@ -20,7 +21,7 @@
    [pallet.ssh.execute :refer [ssh-script-on-target]]
    [pallet.stevedore :as stevedore]
    [pallet.utils :refer [deep-merge map-seq maybe-assoc]]
-   pallet.environment))
+   [schema.core :as schema :refer [maybe optional-key validate]]))
 
 
 ;;; Meta
@@ -295,7 +296,8 @@
       (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
 
 (deftype Ec2Service
-    [credentials api image-info environment instance-poller tag-provider]
+    [credentials api image-info environment instance-poller tag-provider
+     jump-hosts]
   pallet.compute.ComputeService
 
   (nodes [service]
@@ -485,24 +487,50 @@
 
   pallet.compute.ComputeServiceProperties
   (service-properties [compute]
-    (assoc (bean compute) :provider :pallet-ec2))
+    {:provider :pallet-ec2
+     :identity (:access-key (.credentials compute))
+     :credential (:secret-key (.credentials compute))
+     :credentials (.credentials compute)
+     :api (.api compute)
+     :image-info @(.image_info compute)
+     :environment (.environment compute)
+     :instance-poller (.instance_poller compute)
+     :tag-provider (.tag_provider compute)})
 
   impl/AwsExecute
   (execute [compute command args]
     (aws/execute api (command credentials args))))
 
+(if-feature jump-hosts-protocol
+            (do
+              (require 'pallet.compute.protocols)
+              (extend-protocol pallet.compute.protocols/JumpHosts
+                Ec2Service
+                (jump-hosts [service] (.jump_hosts service))))
+            nil)
+
+(def ServiceOptions
+  {:identity String
+   :credential String
+   (optional-key :region) String
+   (optional-key :environment) {schema/Keyword schema/Any}
+   (optional-key :tag-provider) (maybe
+                                 (schema/protocol pallet.compute/NodeTagReader))
+   (optional-key :api) {schema/Keyword schema/Any}
+   (optional-key :poller) {schema/Keyword schema/Any}})
 
 ;; service factory implementation for ec2
 (defmethod implementation/service :pallet-ec2
-  [provider {:keys [identity credential endpoint environment tag-provider
-                    api poller]
-             :or {endpoint "US_EAST_1"}
+  [provider {:keys [identity credential region environment tag-provider
+                    api poller jump-hosts]
+             :or {region "us-east-1"}
              :as options}]
+  {:pre [(validate ServiceOptions options)]}
   (let [options (dissoc
                  options
                  :identity :credential :extensions :blobstore :environment)
         credentials {:access-key identity :secret-key credential
-                     :endpoint endpoint}
+                     :region region}
         api (or api (aws/start {}))
         poller (or poller (poller/start
                            {:credentials credentials
@@ -514,4 +542,5 @@
      (atom {})
      environment
      poller
-     tag-provider)))
+     tag-provider
+     jump-hosts)))
