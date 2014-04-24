@@ -2,7 +2,7 @@
   "Amazon ec2 provider for pallet"
   (:refer-clojure :exclude [proxy])
   (:require
-   [clojure.core.async :as async :refer [<! alts!! chan timeout]]
+   [clojure.core.async :as async :refer [<! >! alts!! chan timeout]]
    [clojure.string :as string]
    [taoensso.timbre :refer [debugf warnf infof tracef]]
    [com.palletops.awaze.ec2 :as ec2]
@@ -18,6 +18,7 @@
    [pallet.compute.implementation :as implementation]
    [pallet.compute.protocols :as impl]
    [pallet.core.context :refer [with-domain]]
+   [pallet.environment]
    [pallet.exception :refer [combine-exceptions]]
    [pallet.feature :refer [if-feature has-feature?]]
    [pallet.node :as node]
@@ -27,8 +28,7 @@
    [pallet.user :refer [UserUnconstrained]]
    [pallet.utils :refer [deep-merge map-seq maybe-assoc]]
    [pallet.utils.async :refer [from-chan go-try]]
-   pallet.environment
-   [schema.core :refer [validate]]))
+   [schema.core :as schema :refer [maybe optional-key validate]]))
 
 
 ;;; Meta
@@ -327,7 +327,8 @@
       (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
 
 (deftype Ec2Service
-    [credentials api image-info environment instance-poller tag-provider]
+    [credentials api image-info environment instance-poller tag-provider
+     jump-hosts]
 
   pallet.core.protocols/Closeable
   (close [_]
@@ -339,8 +340,9 @@
     (with-domain :ec2
       (go-try ch
         (debugf "nodes")
-        (let [instances (aws/execute
-                         api (ec2/describe-instances-map credentials {}))]
+        (let [instances (->> (aws/execute
+                              api (ec2/describe-instances-map credentials {}))
+                             (remove #(= "terminated" (-> % :state :name))))]
           (>! ch {:targets (map
                             #(node-map % service)
                             (instances-response->instances instances))})))))
@@ -528,12 +530,31 @@
 
   pallet.compute.protocols.ComputeServiceProperties
   (service-properties [compute]
-    (assoc (bean compute) :provider :pallet-ec2))
+    {:provider :pallet-ec2
+     :identity (:access-key (.credentials compute))
+     :credential (:secret-key (.credentials compute))
+     :credentials (.credentials compute)
+     :api (.api compute)
+     :image-info @(.image_info compute)
+     :environment (.environment compute)
+     :instance-poller (.instance_poller compute)
+     :tag-provider (.tag_provider compute)})
 
   ec2-impl/AwsExecute
   (execute [compute command args]
-    (aws/execute api (command credentials args))))
+    (aws/execute api (command credentials args)))
 
+  pallet.compute.protocols.JumpHosts
+  (jump-hosts [service] (.jump_hosts service)))
+
+(def ServiceOptions
+  {:identity String
+   :credential String
+   (optional-key :region) String
+   (optional-key :environment) {schema/Keyword schema/Any}
+   (optional-key :tag-provider) (maybe (schema/protocol impl/NodeTagReader))
+   (optional-key :api) {schema/Keyword schema/Any}
+   (optional-key :poller) {schema/Keyword schema/Any}})
 
 (defn regions
   "Return the ec2 regions for a service."
@@ -561,9 +582,10 @@
 ;; service factory implementation for ec2
 (defmethod implementation/service :pallet-ec2
   [provider {:keys [identity credential region environment tag-provider
-                    api poller]
-             :or {region "US_EAST_1"}
+                    api poller jump-hosts]
+             :or {region "us-east-1"}
              :as options}]
+  {:pre [(validate ServiceOptions options)]}
   (let [options (dissoc
                  options
                  :identity :credential :extensions :blobstore :environment)
@@ -579,4 +601,5 @@
      (atom {})
      environment
      poller
-     tag-provider)))
+     tag-provider
+     jump-hosts)))
