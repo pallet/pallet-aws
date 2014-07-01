@@ -240,22 +240,6 @@
     :io :high
     :ebs-optimised 1000}                ; Mbps
 
-   :m3.xlarge
-   {:ram (* 1024 15)                    ;  GiB memory
-    :cpus [{:cores 4 :speed 3.25}]      ; 13 Compute Units
-    :disks []
-    :64-bit true
-    :io :moderate
-    :ebs-optimised false}
-
-   :m3.2xlarge
-   {:ram (* 1024 30)                    ; GiB memory
-    :cpus [{:cores 8 :speed 3.25}]      ; 26 Compute Units
-    :disks []
-    :64-bit true
-    :io :high
-    :ebs-optimised false}
-
    :t1.micro
    {:ram 613                            ; MiB memory
     :cpus [{:cores 1 :speed 1}]         ; Up to 2 EC2 Compute Units
