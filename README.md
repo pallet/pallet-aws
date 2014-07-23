@@ -13,6 +13,7 @@ Add the following to your dependencies:
 
 ```clj
 [com.palletops/pallet-aws "0.2.3"]
+[org.slf4j/jcl-over-slf4j "1.7.5"]
 ```
 
 Warning: versions 0.2.2 and prior contain a nasty bug that will remove
