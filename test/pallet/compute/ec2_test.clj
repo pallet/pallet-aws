@@ -58,7 +58,31 @@
                         {:block-device-mapping
                          [{:device-name "/dev/sdh"}]}}))
           "sg" "kn"))
-      "block-device-mapping"))
+      "block-device-mapping")
+  (is (= {:key-name "kn",
+          :max-count 1,
+          :min-count 1,
+          :image-id "i"
+          :network-interfaces [{:device-index 0
+                                :subnet-id "subnet-abcdef77"
+                                :groups ["sg-abcdef88"]
+                                :associate-public-ip-address true
+                                :delete-on-termination true}]}
+         (launch-options
+          1
+          (group-spec :gn
+            :node-spec
+            (node-spec
+             :image {:image-id "i"}
+             :provider {:pallet-ec2
+                        {:network-interfaces
+                         [{:device-index 0
+                                :subnet-id "subnet-abcdef77"
+                                :groups ["sg-abcdef88"]
+                                :associate-public-ip-address true
+                                :delete-on-termination true}]}}))
+          "sg" "kn"))
+      "network-interfaces"))
 
 (deftest instance-tags-test
   (is (= [{:key "pallet-group", :value "abcd"}

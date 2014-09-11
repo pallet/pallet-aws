@@ -290,7 +290,11 @@
        :min-count node-count
        :max-count node-count
        :key-name key-name
-       :security-groups [security-group]}
+       }
+      (maybe-assoc
+       :security-groups
+       (when-not (-> node-spec :provider :pallet-ec2 :network-interfaces)
+         [security-group]))
       (maybe-assoc :placement placement)
       (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
 
