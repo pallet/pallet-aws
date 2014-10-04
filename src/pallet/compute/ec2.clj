@@ -184,6 +184,17 @@
 
 
 ;;; Compute service
+(defn vpc-id-for-subnet
+  [credentials api subnet-id]
+  (let [{:keys [subnets] :as resp}
+        (aws/execute
+         api
+         (ec2/describe-subnets-map
+          credentials
+          {:subnet-ids [subnet-id]}))]
+    (debugf "vpc-id-for-subnet %s %s" subnet-id resp)
+    (:vpc-id (first subnets))))
+
 (defn ensure-keypair [credentials api key-name user]
   (let [key-pairs (try (aws/execute
                         api (ec2/describe-key-pairs-map
@@ -201,34 +212,55 @@
          :public-key-material (slurp (:public-key-path user))}))
       (infof "Keypair '%s' created." key-name ))))
 
-(defn ensure-security-group [credentials api security-group-name]
-  (let [sgs (try
+(defn ensure-security-group
+  "Ensure the specified security group name exists, and return its ID."
+  [credentials api security-group-name vpc-id]
+  (debugf "ensure-security-group existing %s %s" security-group-name vpc-id)
+  (let [filters [{:name "group-name" :values [security-group-name]}]
+        filters (if vpc-id
+                  (conj filters {:name "vpc-id" :values [vpc-id]})
+                  filters)
+        {:keys [security-groups] :as sgs}
+        (try
+          (aws/execute
+           api
+           (ec2/describe-security-groups-map
+            credentials {:filters filters}))
+          (catch com.amazonaws.AmazonServiceException e))
+        matching-group (->> security-groups
+                            (filter #(and
+                                      (= vpc-id (:vpc-id %))
+                                      (= security-group-name (:group-name %))))
+                            first)]
+    (debugf "ensure-security-group %s %s" (boolean matching-group) (pr-str sgs))
+    (if matching-group
+      (:group-id matching-group)
+      (do
+        (infof "Security group '%s' not present for vpc %s. Creating it..."
+               security-group-name vpc-id)
+        (let [{:keys [group-id] :as resp}
               (aws/execute
                api
-               (ec2/describe-security-groups-map
-                credentials {:group-names [security-group-name]}))
-              (catch com.amazonaws.AmazonServiceException e))]
-    (debugf "ensure-security-group existing %s" (pr-str sgs))
-    (when-not (seq sgs)
-      (infof "Security group '%s' not present. Creating it..." security-group-name)
-      (aws/execute
-       api
-       (ec2/create-security-group-map
-        credentials
-        {:group-name security-group-name
-         :description
-         (str "Pallet created group for " security-group-name)}))
-      (infof "Security group '%s' created. Opening SSH port..." security-group-name)
-      (aws/execute
-       api
-       (ec2/authorize-security-group-ingress-map
-        credentials
-        {:group-name security-group-name
-         :ip-permissions [{:ip-protocol "tcp"
-                           :from-port 22
-                           :to-port 22
-                           :ip-ranges ["0.0.0.0/0"]}]}))
-      (infof "SSH port is open for group '%s'" security-group-name))))
+               (ec2/create-security-group-map
+                credentials
+                {:group-name security-group-name
+                 :description
+                 (str "Pallet created group for " security-group-name)
+                 :vpc-id vpc-id}))]
+
+          (debugf "Security group '%s' created." resp)
+          (infof "Security group '%s' created. Opening SSH port..." security-group-name)
+          (aws/execute
+           api
+           (ec2/authorize-security-group-ingress-map
+            credentials
+            {:group-id group-id
+             :ip-permissions [{:ip-protocol "tcp"
+                               :from-port 22
+                               :to-port 22
+                               :ip-ranges ["0.0.0.0/0"]}]}))
+          (infof "SSH port is open for group '%s'" security-group-name)
+          group-id)))))
 
 (defn- get-tags [credentials api node]
   (let [tags (aws/execute
@@ -274,7 +306,7 @@
   (mapcat :instances (:reservations instances)))
 
 (defn launch-options
-  [node-count group-spec security-group key-name]
+  [node-count group-spec security-group-id key-name]
   (let [node-spec group-spec
         placement (-> {}
                       (maybe-assoc
@@ -290,9 +322,11 @@
        :min-count node-count
        :max-count node-count
        :key-name key-name
-       :security-groups [security-group]}
+       :security-group-ids [security-group-id]}
       (maybe-assoc :placement placement)
       (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
+
+(def ^:dynamic *enable-run-instances* true)
 
 (deftype Ec2Service
     [credentials api image-info environment instance-poller tag-provider]
@@ -353,12 +387,17 @@
       group-spec))
 
   (run-nodes [service group-spec node-count user init-script options]
-    (when-not (every? (:image group-spec) [:os-family :os-version :login-user])
+    (when-not (and
+               (:image group-spec)
+               (every? (:image group-spec)
+                       [:os-family :os-version :login-user]))
       (throw
        (ex-info
-        "node-spec :image must contain :os-family :os-version :login-user keys"
+        (str "node-spec :image must contain :os-family :os-version :login-user keys."
+             " group-spec: " (pr-str group-spec))
         {:supplied (select-keys (:image group-spec)
-                                [:os-family :os-version :login-user])})))
+                                [:os-family :os-version :login-user])
+         :group-spec group-spec})))
     (debugf "run-nodes %s %s %s"
             (:group-name group-spec) node-count (:image group-spec))
     (let [key-name (-> group-spec :image :key-name)
@@ -367,20 +406,24 @@
                      (let [key-name (user-keypair-name user)]
                        (ensure-keypair credentials api key-name user)
                        key-name))
+          subnet-id (-> group-spec :provider :pallet-ec2 :subnet-id)
+          vpc-id (if subnet-id
+                   (vpc-id-for-subnet credentials api subnet-id))
           security-group (-> group-spec :node-spec :config :security-group)
-          security-group (if (seq security-group)
-                           security-group
-                           (let [security-group (security-group-name
-                                                 group-spec)]
-                             (ensure-security-group
-                              credentials api security-group)
-                             security-group))]
+          security-group-id (let [security-group (or
+                                                  security-group
+                                                  (security-group-name
+                                                   group-spec))]
+                              (ensure-security-group
+                               credentials api security-group vpc-id))]
       (debugf "run-nodes %s nodes" node-count)
       (infof "Creating %s node(s) in group '%s'..."
              node-count (name (:group-name group-spec)))
       (let [options (launch-options
-                     node-count group-spec security-group key-name)
-            resp (ec2/run-instances credentials options)]
+                     node-count group-spec security-group-id key-name)
+            _ (debugf "launch-options %s" options)
+            resp (if *enable-run-instances*
+                   (ec2/run-instances credentials options))]
         (debugf "run-nodes run-instances options %s" options)
         (debugf "run-nodes run-instances %s" resp)
         (debugf "run-nodes %s" (pr-str (-> resp :reservation :instances)))

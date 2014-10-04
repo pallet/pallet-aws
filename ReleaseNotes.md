@@ -1,7 +1,18 @@
+## 0.2.4
+
+- Make provider work on non-default VPC
+  Use security group ids rahter than security group names.
+
+- Update to pallet-aws-ops 0.2.1
+
+- Add jcl-over-slf4j to default dependencies in readme
+
+- Add the new generation ec2 instance types
+
 ## 0.2.3
 
 - Fix bug in destroy-nodes-in-group
-  The bug would remove all noes in an account when any group was converged 
+  The bug would remove all noes in an account when any group was converged
   to 0 nodes.
 
   Closes #7
