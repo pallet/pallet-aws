@@ -1,6 +1,6 @@
 # Pallet AWS Provider
 
-[![Build Status](https://travis-ci.org/pallet/pallet-aws.svg?branch=0.2.3)](https://travis-ci.org/pallet/pallet-aws)
+[![Build Status](https://travis-ci.org/pallet/pallet-aws.svg?branch=0.2.4)](https://travis-ci.org/pallet/pallet-aws)
 
 A [pallet](http://palletops.com/) provider for [AWS](http://aws.amazon.com/), based on
 the Amazon java SDK.
@@ -12,7 +12,7 @@ The EC2 provider uses the `:pallet-ec2` key.
 Add the following to your dependencies:
 
 ```clj
-[com.palletops/pallet-aws "0.2.3"]
+[com.palletops/pallet-aws "0.2.4"]
 [org.slf4j/jcl-over-slf4j "1.7.5"]
 ```
 
