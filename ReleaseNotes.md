@@ -1,3 +1,7 @@
+## 0.2.5
+
+- Fix generation of signed s3 requests
+
 ## 0.2.4
 
 - Make provider work on non-default VPC
