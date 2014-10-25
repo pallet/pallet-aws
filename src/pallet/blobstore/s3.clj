@@ -2,6 +2,7 @@
   "Amazon s3 provider for pallet"
   (:require
    [clojure.java.io :refer [input-stream]]
+   [clojure.string :as string]
    [com.palletops.awaze.s3 :as s3]
    [com.palletops.aws.api :as aws]
    [pallet.blobstore :as blobstor]
@@ -77,7 +78,7 @@
       {:bucket-name bucket-name
        :key key
        :expiration (one-hour-from-now)
-       :method (:method request-map :GET)
+       :method (-> (:method request-map :GET) name string/upper-case)
        :response-headers (dissoc request-map :method)})))
 
 
