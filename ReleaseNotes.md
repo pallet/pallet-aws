@@ -1,3 +1,14 @@
+## 0.2.6
+
+- Update to pallet-aws-ops 0.2.2
+
+- Enable use of :network-interfaces
+  The subnet ID and groups were not being handled correctly.
+
+- Report private DNS if public DNS not set
+
+- Fix block device doc in README
+
 ## 0.2.5
 
 - Fix generation of signed s3 requests

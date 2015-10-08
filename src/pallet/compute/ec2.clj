@@ -145,7 +145,11 @@
   (group-name [node] (get-tag info pallet-group-tag))
   (os-family [node] (:os-family (node-image-value info)))
   (os-version [node] (:os-version (node-image-value info)))
-  (hostname [node] (:public-dns-name info))
+  (hostname [node]
+    (or (let [n (:public-dns-name info)]
+          (if (and n (not (string/blank? n)))
+            n))
+        (:private-dns-name info)))
   (id [node] (:instance-id info))
   (running? [node] (= "running" (-> info :state :name)))
   (terminated? [node] (#{"terminated" "shutting-down"}
@@ -313,16 +317,26 @@
                        :availability-zone
                        (-> node-spec :location :location-id))
                       (merge (-> node-spec :provider :pallet-ec2 :placement))
-                      map-seq)]
+                      map-seq)
+        groups (if-let [nis (-> node-spec :provider :pallet-ec2
+                                :network-interfaces)]
+                 {:network-interfaces
+                  (map
+                   (fn [ni]
+                     (if (:groups ni)
+                       ni
+                       (assoc ni :groups [security-group-id])))
+                   nis)}
+                 {:security-group-ids [security-group-id]})]
     (deep-merge
      (select-keys (-> group-spec :node-spec :image) [:image-id])
      (dissoc (-> node-spec :provider :pallet-ec2) :placement)
+     groups
      (->
       {:image-id (-> group-spec :image :image-id)
        :min-count node-count
        :max-count node-count
-       :key-name key-name
-       :security-group-ids [security-group-id]}
+       :key-name key-name}
       (maybe-assoc :placement placement)
       (maybe-assoc :instance-type (-> node-spec :hardware :hardware-id))))))
 
@@ -406,7 +420,12 @@
                      (let [key-name (user-keypair-name user)]
                        (ensure-keypair credentials api key-name user)
                        key-name))
-          subnet-id (-> group-spec :provider :pallet-ec2 :subnet-id)
+          subnet-id (or (-> group-spec :provider :pallet-ec2 :subnet-id)
+                        (first
+                         (map
+                          :subnet-id
+                          (-> group-spec :provider :pallet-ec2
+                              :network-interfaces))))
           vpc-id (if subnet-id
                    (vpc-id-for-subnet credentials api subnet-id))
           security-group (-> group-spec :node-spec :config :security-group)
@@ -447,8 +466,7 @@
                     running? (fn [node] (= "running" (-> node :state :name)))
                     _ (debugf "run-nodes Waiting for instances to come up")
                     good-instances (filter running? instances)]
-                (when-let [failed (seq
-                                   (filter (complement running?) instances))]
+                (when-let [failed (seq (remove running? instances))]
                   (warnf "run-nodes Nodes failed to start %s" (vec failed))
                   (warnf
                    "%s of %s node(s) failed to start for group '%s'"
