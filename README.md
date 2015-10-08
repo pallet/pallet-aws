@@ -68,7 +68,7 @@ by pallet to run the `:bootstrap` phase.
 
 ### Block devices and EBS
 
-The provider specific `block-device-mapping` key can be used to set up block devices.
+The provider specific `block-device-mappings` key can be used to set up block devices.
 It takes a sequence of maps with the following keys:
 
 `:device-name`
@@ -89,7 +89,7 @@ to the instance, you must mount the volume.
 : Indicates whether to delete the volume on instance termination.
 
 `:ebs :volume-type`
-: The volume type ("standard" or "io1")
+: The volume type ("standard", "gp2" for SSD, or "io1" for SSD with provisioned IOPS)
 
 `:ebs :iops`
 : For "io1" volumes, the number of I/O operations per second (IOPS)
