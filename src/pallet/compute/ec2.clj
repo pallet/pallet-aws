@@ -145,7 +145,11 @@
   (group-name [node] (get-tag info pallet-group-tag))
   (os-family [node] (:os-family (node-image-value info)))
   (os-version [node] (:os-version (node-image-value info)))
-  (hostname [node] (:public-dns-name info))
+  (hostname [node]
+    (or (let [n (:public-dns-name info)]
+          (if (and n (not (string/blank? n)))
+            n))
+        (:private-dns-name info)))
   (id [node] (:instance-id info))
   (running? [node] (= "running" (-> info :state :name)))
   (terminated? [node] (#{"terminated" "shutting-down"}
