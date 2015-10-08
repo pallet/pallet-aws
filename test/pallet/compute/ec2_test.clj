@@ -63,7 +63,6 @@
           :max-count 1,
           :min-count 1,
           :image-id "i"
-          :security-group-ids ["sg"]
           :network-interfaces [{:device-index 0
                                 :subnet-id "subnet-abcdef77"
                                 :groups ["sg-abcdef88"]
