@@ -1,3 +1,7 @@
+## 0.2.7
+
+- Add t2.large static information
+
 ## 0.2.6
 
 - Update to pallet-aws-ops 0.2.2
