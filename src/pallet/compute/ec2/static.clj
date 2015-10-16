@@ -33,6 +33,15 @@
     :io :low
     :ebs-optimized false}
 
+   :t2.large
+   {:ram (GiB 8)
+    :cpus [{:cores 2 :speed 1}]
+    :disks []
+    :32-bit true
+    :64-bit true
+    :io :low
+    :ebs-optimized false}
+
    ;;; General Purpose
 
    :m3.medium
