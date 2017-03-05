@@ -44,6 +44,17 @@ key in the node-spec's `:image`.
 You must specify the `:os-family`, `:os-version` and `:login-user`
 with ami specific information.
 
+### Hardware
+
+The hardware to use for the node is passed as a string to the `:hardware-id`
+key in the node-spec's `:hardware`.
+
+```clj
+(node-spec ... :hardware {:hardware-id "t2.micro"})
+```
+
+The defined hardware types can be found here: https://github.com/pallet/pallet-aws/blob/develop/src/pallet/compute/ec2/static.clj
+
 ### Availability Zones
 
 The availability zone can be specifed in the `:location` key of the node-spec.
@@ -51,6 +62,15 @@ The availability zone can be specifed in the `:location` key of the node-spec.
 ```clj
 (node-spec ... :location {:location-id "us-east-1d"})
 ```
+
+If you want to user other locations, you've to adjust the service endpoint in your provider also:
+
+```clj
+(instantiate-provider :pallet-ec2 :endpoint "eu-central-1")
+
+(node-spec ... :location {:location-id "eu-central-1a"})
+```
+
 
 ### KeyPairs
 
@@ -100,7 +120,7 @@ that the volume supports. Range is 100 to 4000.
 
 ### Network Interfaces
 
-The provider specific `:network-interface` key takes a sequence of
+The provider specific `:network-interfaces` key takes a sequence of
 maps with the following keys (and key paths):
 
 `:network-interface-id`
@@ -156,6 +176,17 @@ launching more than one network interface.  Can only be associated
 with a new network interface, not an existing one. Default: If
 launching into a default subnet, the default value is true. If
 launching into a nondefault subnet, the default value is false.
+
+example:
+```clj
+(node-spec ... :provider {:pallet-ec2 {
+                            :network-interfaces 
+                            [{:device-index 0
+                              :groups ["sg-xxxxx"]
+                              :subnet-id "subnet-xxxxxx"
+                              :associate-public-ip-address true
+                              :delete-on-termination true}]})
+```
 
 ### IAM Roles
 
